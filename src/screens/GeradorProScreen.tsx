@@ -514,6 +514,34 @@ export const GeradorProScreen: React.FC<GeradorProScreenProps> = ({
   const activeEditorRef = useRef<RichTextEditorRef | null>(null);
   const lastParsedHtmlRef = useRef<string | undefined>(emailData.customCodeHtml);
 
+  const [iframeHeight, setIframeHeight] = useState<number>(600);
+  const previewIframeRef = useRef<HTMLIFrameElement | null>(null);
+
+  // Auto resize iframe to fit full content without internal scrollbars
+  const handleIframeLoad = () => {
+    try {
+      if (previewIframeRef.current && previewIframeRef.current.contentWindow) {
+        const doc = previewIframeRef.current.contentDocument || previewIframeRef.current.contentWindow.document;
+        if (doc) {
+          const scrollH = doc.documentElement.scrollHeight || doc.body.scrollHeight;
+          if (scrollH && scrollH > 200) {
+            setIframeHeight(scrollH + 10);
+          }
+        }
+      }
+    } catch {
+      // Cross-origin fallback
+    }
+  };
+
+  useEffect(() => {
+    // Whenever compiledHtml or device changes, recalculate iframe height
+    const timer = setTimeout(() => {
+      handleIframeLoad();
+    }, 150);
+    return () => clearTimeout(timer);
+  }, [compiledHtml, previewDevice]);
+
   // Continuously sync compiled HTML from Gerador Visual blocks to global emailData.customCodeHtml
   useEffect(() => {
     const compiled = compileBlocksToHtml(blocks);
@@ -2980,7 +3008,7 @@ export const GeradorProScreen: React.FC<GeradorProScreenProps> = ({
       </div>
 
       {/* COLUNA DIREITA: CANVAS DE VISUALIZAÇÃO EM TEMPO REAL (STICKY ON DESKTOP) */}
-          <div className="lg:col-span-5 xl:col-span-6 lg:sticky lg:top-20 lg:self-start z-10 space-y-4 max-h-[calc(100vh-100px)] overflow-y-auto pr-1">
+          <div className="lg:col-span-5 xl:col-span-6 lg:sticky lg:top-20 lg:self-start z-10 space-y-4">
             <div className="bg-slate-50 border border-slate-200/90 rounded-2xl p-4 sm:p-5 shadow-sm space-y-4">
               <div className="flex items-center justify-between border-b border-slate-200 pb-3 flex-wrap gap-2">
                 <div className="flex items-center gap-2">
@@ -3027,17 +3055,21 @@ export const GeradorProScreen: React.FC<GeradorProScreenProps> = ({
                 </div>
               </div>
 
-              {/* Rendered Live Canvas Simulation Container */}
-              <div className="bg-slate-100/90 rounded-2xl p-3 sm:p-4 flex justify-center items-center">
+              {/* Rendered Live Canvas Simulation Container (Fluid Height, No Internal Scrollbar) */}
+              <div className="bg-slate-100/90 rounded-2xl p-3 sm:p-4 flex justify-center items-start">
                 <div
                   className={`transition-all duration-300 bg-white rounded-xl shadow-md overflow-hidden ${
                     previewDevice === 'mobile' ? 'w-[340px]' : 'w-full max-w-[580px]'
                   }`}
                 >
                   <iframe
+                    ref={previewIframeRef}
+                    onLoad={handleIframeLoad}
                     title="Gerador PRO Live Preview Canvas"
                     srcDoc={compiledHtml}
-                    className="w-full h-[520px] lg:h-[calc(100vh-270px)] min-h-[420px] max-h-[620px] border-0"
+                    scrolling="no"
+                    style={{ height: `${iframeHeight}px` }}
+                    className="w-full border-0 transition-[height] duration-200 block"
                   />
                 </div>
               </div>
