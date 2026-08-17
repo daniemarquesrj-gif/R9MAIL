@@ -197,8 +197,9 @@ export const getDefaultBlockFontSize = (type: BlockType): number => {
 
 // Helper to construct inline CSS string for text blocks
 function buildTextStyle(block: EmailBlock, defaultSize: number, defaultColor: string, defaultAlign = 'left'): string {
+  if (!block) return `color: ${defaultColor}; font-size: ${defaultSize}px; text-align: ${defaultAlign};`;
   const sizeMap: Record<string, number> = { sm: 18, md: 22, lg: 26, xl: 30 };
-  const size = block.fontSizePx || (block.fontSize ? sizeMap[block.fontSize] : defaultSize);
+  const size = block.fontSizePx || (block.fontSize ? sizeMap[block.fontSize] : defaultSize) || defaultSize;
   const color = block.textColor || defaultColor;
   const align = block.alignment || defaultAlign;
   const bold = block.isBold ? 'font-weight: bold;' : 'font-weight: normal;';
@@ -217,17 +218,31 @@ function buildTextStyle(block: EmailBlock, defaultSize: number, defaultColor: st
 }
 
 export function compileBlocksToHtml(blocks: EmailBlock[]): string {
+  if (!Array.isArray(blocks) || blocks.length === 0) {
+    return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>body { font-family: Helvetica, Arial, sans-serif; padding: 30px; text-align: center; color: #64748b; }</style>
+</head>
+<body>
+  <p>Nenhum bloco no e-mail. Adicione blocos para visualizar.</p>
+</body>
+</html>`;
+  }
+
   let htmlContent = '';
 
   blocks.forEach((block) => {
+    if (!block || !block.type) return;
     switch (block.type) {
       case 'header_text':
       case 'header': {
         const bg = block.headerBgColor || block.bgColor || '#003bb3';
         const rawTitle = block.headerTitle || 'ESTÁCIO\nSUA MATRÍCULA\nCOMEÇA AQUI!';
-        const formattedTitle = rawTitle.replace(/\n/g, '<br/>');
+        const formattedTitle = String(rawTitle).replace(/\n/g, '<br/>');
         const rawSubtitle = block.headerSubtitle;
-        const formattedSubtitle = rawSubtitle ? rawSubtitle.replace(/\n/g, '<br/>') : '';
+        const formattedSubtitle = rawSubtitle ? String(rawSubtitle).replace(/\n/g, '<br/>') : '';
 
         const titleSize = block.fontSizePx || 28;
         const style = buildTextStyle(
@@ -298,7 +313,7 @@ export function compileBlocksToHtml(blocks: EmailBlock[]): string {
       case 'text': {
         const align = block.alignment || 'left';
         const rawTxt = block.text || 'Insira aqui o texto do seu parágrafo...';
-        const formattedTxt = rawTxt.replace(/\n/g, '<br/>');
+        const formattedTxt = String(rawTxt).replace(/\n/g, '<br/>');
         const style = buildTextStyle(block, 15, '#334155', align);
         const bgStyle = block.bgColor ? `background-color: ${block.bgColor};` : '';
 
@@ -407,7 +422,7 @@ export function compileBlocksToHtml(blocks: EmailBlock[]): string {
       case 'footer': {
         const bg = block.footerBgColor || block.bgColor || '#f8fafc';
         const rawTxt = block.footerText || '© 2026 Minha Empresa. Todos os direitos reservados.';
-        const formatted = rawTxt.replace(/\n/g, '<br/>');
+        const formatted = String(rawTxt).replace(/\n/g, '<br/>');
         const style = buildTextStyle(
           { ...block, textColor: block.footerTextColor || '#64748b' },
           block.fontSizePx || 12,
@@ -516,6 +531,8 @@ export const GeradorProScreen: React.FC<GeradorProScreenProps> = ({
 
   const [iframeHeight, setIframeHeight] = useState<number>(600);
   const previewIframeRef = useRef<HTMLIFrameElement | null>(null);
+
+  const compiledHtml = compileBlocksToHtml(blocks);
 
   // Auto resize iframe to fit full content without internal scrollbars
   const handleIframeLoad = () => {
@@ -942,8 +959,6 @@ export const GeradorProScreen: React.FC<GeradorProScreenProps> = ({
       })
     );
   };
-
-  const compiledHtml = compileBlocksToHtml(blocks);
 
   const getBlockLabel = (type: BlockType) => {
     const labels: Record<BlockType, { name: string; icon: string }> = {
@@ -3003,6 +3018,24 @@ export const GeradorProScreen: React.FC<GeradorProScreenProps> = ({
                 })}
               </div>
             )}
+          </div>
+        )}
+
+        {!selectedBlock && (
+          <div className="bg-slate-50 border border-dashed border-slate-300 rounded-xl p-8 text-center space-y-3">
+            <span className="material-symbols-outlined text-[36px] text-slate-400">touch_app</span>
+            <p className="text-sm font-bold text-slate-700">Nenhum bloco selecionado para edição</p>
+            <p className="text-xs text-slate-500 max-w-sm mx-auto">
+              Clique em um bloco na lista acima ou adicione um novo bloco pelo botão <strong>+ Adicionar Bloco</strong>.
+            </p>
+            <button
+              type="button"
+              onClick={() => handleAddBlock('text')}
+              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl shadow-xs inline-flex items-center gap-1.5 cursor-pointer"
+            >
+              <span className="material-symbols-outlined text-[16px]">add</span>
+              <span>Adicionar Primeiro Bloco</span>
+            </button>
           </div>
         )}
       </div>

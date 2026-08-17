@@ -10,6 +10,7 @@ import { EditorScreen } from './screens/EditorScreen';
 import { VisualizacaoScreen } from './screens/VisualizacaoScreen';
 import { GeradorProScreen } from './screens/GeradorProScreen';
 import { InicioScreen } from './screens/InicioScreen';
+import { ErrorBoundary } from './components/ErrorBoundary';
 
 export default function App() {
   const [currentScreen, setCurrentScreen] = useState<Screen>('inicio');
@@ -114,11 +115,13 @@ export default function App() {
             )}
 
             {currentScreen === 'gerador_pro' && (
-              <GeradorProScreen
-                emailData={emailData}
-                setEmailData={setEmailData}
-                onNavigate={handleNavigate}
-              />
+              <ErrorBoundary fallbackTitle="Editor de Blocos">
+                <GeradorProScreen
+                  emailData={emailData}
+                  setEmailData={setEmailData}
+                  onNavigate={handleNavigate}
+                />
+              </ErrorBoundary>
             )}
           </motion.div>
         </AnimatePresence>
