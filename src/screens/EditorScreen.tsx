@@ -26,10 +26,13 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
 
   useEffect(() => {
     // If code is modified in editor, reflect in emailData
-    setEmailData((prev) => ({
-      ...prev,
-      customCodeHtml: code,
-    }));
+    setEmailData((prev) => {
+      if (prev.customCodeHtml === code) return prev;
+      return {
+        ...prev,
+        customCodeHtml: code,
+      };
+    });
   }, [code, setEmailData]);
 
   const insertVariable = (variable: string) => {

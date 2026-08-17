@@ -864,7 +864,16 @@ export function parseHtmlToBlocks(html: string): EmailBlock[] {
   const blocks: EmailBlock[] = [];
   let blockCounter = 1;
 
-  const createId = () => `block-${Date.now()}-${blockCounter++}`;
+  const createId = (el?: Element | null) => {
+    if (el) {
+      const dataId = el.getAttribute('data-block-id');
+      if (dataId) return dataId;
+      if (el.id && el.id.startsWith('preview-block-')) {
+        return el.id.replace('preview-block-', '');
+      }
+    }
+    return `block-${blockCounter++}`;
+  };
 
   // Find primary email container or body
   const rootContainer = doc.querySelector('.card') || doc.querySelector('table') || doc.body;
