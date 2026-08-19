@@ -53,6 +53,32 @@ export const RichTextEditor = forwardRef<RichTextEditorRef, RichTextEditorProps>
       }
     }, [value]);
 
+    // Handle plain-text paste only (strip all incoming HTML, styles, fonts, etc.)
+    const handlePaste = (e: React.ClipboardEvent<HTMLDivElement>) => {
+      e.preventDefault();
+      const plainText = e.clipboardData.getData('text/plain');
+      if (!plainText) return;
+
+      const sel = window.getSelection();
+      if (sel && sel.rangeCount > 0) {
+        const range = sel.getRangeAt(0);
+        range.deleteContents();
+
+        // Convert newline characters into text nodes or break lines cleanly
+        const textNode = document.createTextNode(plainText);
+        range.insertNode(textNode);
+
+        // Move cursor right after the newly inserted plain text
+        range.setStartAfter(textNode);
+        range.collapse(true);
+        sel.removeAllRanges();
+        sel.addRange(range);
+      } else if (editorRef.current) {
+        editorRef.current.innerText += plainText;
+      }
+      handleInput();
+    };
+
     // Handle user input
     const handleInput = () => {
       if (editorRef.current) {
@@ -139,6 +165,7 @@ export const RichTextEditor = forwardRef<RichTextEditorRef, RichTextEditorProps>
           contentEditable
           suppressContentEditableWarning
           onInput={handleInput}
+          onPaste={handlePaste}
           onBlur={() => {
             handleInput();
             if (onBlur) onBlur();
