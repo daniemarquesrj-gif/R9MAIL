@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { EmailData, EmailTemplate, Screen, TransitionType } from '../types';
 import { DEFAULT_TEMPLATES } from '../data/templates';
-import { generateEmailHtml } from '../utils/htmlGenerator';
+import { compileEmailToHtml } from '../utils/compiler';
 import { uploadToPublicHost, checkImageSize } from '../utils/imageUploader';
 
 interface EditorScreenProps {
@@ -16,7 +16,7 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
   onNavigate,
 }) => {
   const [code, setCode] = useState<string>(
-    () => emailData.customCodeHtml || generateEmailHtml(emailData)
+    () => emailData.customCodeHtml || compileEmailToHtml(emailData)
   );
   const [activeTab, setActiveTab] = useState<'visual' | 'html'>('html');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -105,7 +105,7 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
   };
 
   const handleLoadModelClick = (tmpl: EmailTemplate) => {
-    const newHtml = tmpl.customCodeHtml || generateEmailHtml({
+    const newHtml = tmpl.customCodeHtml || compileEmailToHtml({
       headerTitle: tmpl.headerTitle,
       greeting: tmpl.greeting,
       buttonText: tmpl.buttonText,

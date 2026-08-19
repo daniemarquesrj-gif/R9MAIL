@@ -2,6 +2,88 @@ export type Screen = 'inicio' | 'editor' | 'visualizacao' | 'gerador_pro';
 
 export type TransitionType = 'none' | 'push' | 'push_back';
 
+export type BlockType = 
+  | 'header'
+  | 'header_text'
+  | 'header_image'
+  | 'title'
+  | 'subtitle'
+  | 'text'
+  | 'button'
+  | 'image'
+  | 'coupon'
+  | 'divider'
+  | 'social'
+  | 'footer';
+
+export interface EmailBlock {
+  id: string;
+  type: BlockType;
+  
+  // Text content
+  text?: string;
+  
+  // Font and typography formatting
+  fontSizePx?: number;
+  fontSize?: 'sm' | 'md' | 'lg' | 'xl';
+  textColor?: string;
+  bgColor?: string;
+  alignment?: 'left' | 'center' | 'right' | 'justify';
+  isBold?: boolean;
+  isItalic?: boolean;
+  isUnderline?: boolean;
+  isStrikethrough?: boolean;
+  textTransform?: 'none' | 'uppercase' | 'lowercase' | 'capitalize';
+  fontFamily?: string;
+  lineHeight?: string;
+
+  // Header properties
+  headerTitle?: string;
+  headerSubtitle?: string;
+  headerBgColor?: string;
+  headerTextColor?: string;
+  headerSubtitleColor?: string;
+  headerSubtitleSizePx?: number;
+
+  // Button properties
+  buttonLabel?: string;
+  buttonUrl?: string;
+  buttonBgColor?: string;
+  buttonTextColor?: string;
+  buttonWidth?: 'full' | 'auto';
+
+  // Image properties
+  imageUrl?: string;
+  imageAlt?: string;
+  imageLink?: string;
+  imageCaption?: string;
+
+  // Coupon properties
+  couponCode?: string;
+  couponDiscount?: string;
+  couponTitle?: string;
+  couponExpiry?: string;
+  couponBgColor?: string;
+  couponBorderColor?: string;
+
+  // Divider properties
+  dividerStyle?: 'solid' | 'dashed' | 'dotted';
+  dividerColor?: string;
+  dividerHeight?: number;
+
+  // Social properties
+  instagramUrl?: string;
+  whatsappUrl?: string;
+  linkedinUrl?: string;
+  facebookUrl?: string;
+  websiteUrl?: string;
+
+  // Footer properties
+  footerText?: string;
+  footerBgColor?: string;
+  footerTextColor?: string;
+}
+
 export interface EmailTemplate {
   id: string;
   name: string;
@@ -35,3 +117,4 @@ export interface EmailData {
   cardBorderRadius?: 'none' | 'soft' | 'modern';
   fontSizeLevel?: 'normal' | 'large_mobile';
 }
+

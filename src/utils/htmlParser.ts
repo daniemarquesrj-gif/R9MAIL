@@ -1,46 +1,57 @@
-import { EmailBlock } from '../screens/GeradorProScreen';
-import { EmailData } from '../types';
+import { EmailBlock, EmailData } from '../types';
 
 /**
  * Converts inline CSS string and HTML attributes into a normalized key-value map.
  */
-function parseStylesAndAttrs(node: Element): Record<string, string> {
+function parseStylesAndAttrs(node: Element | null | undefined): Record<string, string> {
   const styles: Record<string, string> = {};
+  if (!node || typeof node.getAttribute !== 'function') return styles;
 
-  // 1. Read inline style attribute
-  const styleString = node.getAttribute('style');
-  if (styleString) {
-    styleString.split(';').forEach((item) => {
-      const parts = item.split(':');
-      if (parts.length >= 2) {
-        const key = parts[0].trim().toLowerCase();
-        const val = parts.slice(1).join(':').trim();
-        styles[key] = val;
-      }
-    });
-  }
+  try {
+    // 1. Read inline style attribute
+    const styleString = node.getAttribute('style');
+    if (styleString) {
+      styleString.split(';').forEach((item) => {
+        const parts = item.split(':');
+        if (parts.length >= 2) {
+          const key = parts[0].trim().toLowerCase();
+          const val = parts.slice(1).join(':').trim();
+          if (key && val) {
+            styles[key] = val;
+          }
+        }
+      });
+    }
 
-  // Handle shorthand background property
-  if (!styles['background-color'] && styles['background']) {
-    const bgCol = parseColorFromStyle(styles['background']);
-    if (bgCol) styles['background-color'] = bgCol;
-  }
+    // Handle shorthand background property
+    if (!styles['background-color'] && styles['background']) {
+      const bgCol = parseColorFromStyle(styles['background']);
+      if (bgCol) styles['background-color'] = bgCol;
+    }
 
-  // 2. Read legacy HTML presentation attributes as fallbacks
-  if (!styles['text-align'] && node.getAttribute('align')) {
-    styles['text-align'] = node.getAttribute('align')!.toLowerCase();
-  }
-  if (!styles['background-color'] && node.getAttribute('bgcolor')) {
-    styles['background-color'] = node.getAttribute('bgcolor')!;
-  }
-  if (!styles['color'] && node.getAttribute('color')) {
-    styles['color'] = node.getAttribute('color')!;
-  }
-  if (!styles['width'] && node.getAttribute('width')) {
-    styles['width'] = node.getAttribute('width')!;
-  }
-  if (!styles['height'] && node.getAttribute('height')) {
-    styles['height'] = node.getAttribute('height')!;
+    // 2. Read legacy HTML presentation attributes as fallbacks
+    const alignAttr = node.getAttribute('align');
+    if (!styles['text-align'] && alignAttr) {
+      styles['text-align'] = alignAttr.toLowerCase();
+    }
+    const bgAttr = node.getAttribute('bgcolor');
+    if (!styles['background-color'] && bgAttr) {
+      styles['background-color'] = bgAttr;
+    }
+    const colorAttr = node.getAttribute('color');
+    if (!styles['color'] && colorAttr) {
+      styles['color'] = colorAttr;
+    }
+    const widthAttr = node.getAttribute('width');
+    if (!styles['width'] && widthAttr) {
+      styles['width'] = widthAttr;
+    }
+    const heightAttr = node.getAttribute('height');
+    if (!styles['height'] && heightAttr) {
+      styles['height'] = heightAttr;
+    }
+  } catch (err) {
+    console.warn('Falha segura ao extrair estilos do nó DOM:', err);
   }
 
   return styles;
@@ -771,101 +782,113 @@ function parseCouponData(node: Element, styles: Record<string, string>) {
 /**
  * Parses an HTML string into structured EmailData fields for Gerador Visual
  */
-export function parseHtmlToEmailData(html: string, _currentData: EmailData): Partial<EmailData> {
-  const parser = new DOMParser();
-  const doc = parser.parseFromString(html, 'text/html');
-
+export function parseHtmlToEmailData(html?: string | null, _currentData?: EmailData): Partial<EmailData> {
   const result: Partial<EmailData> = {
-    customCodeHtml: html,
+    customCodeHtml: html || '',
   };
 
-  // 1. Find Header Title
-  const h1 = doc.querySelector('h1, h2, header, .header, .banner');
-  if (h1) {
-    const text = getTextWithLineBreaks(h1);
-    if (text) result.headerTitle = text;
-    const styles = parseStylesAndAttrs(h1);
-    if (styles['color']) result.primaryColor = parseColor(styles['color']);
-    if (styles['background-color']) result.primaryColor = parseColor(styles['background-color']);
+  if (!html || typeof html !== 'string' || html.trim() === '') {
+    return result;
   }
 
-  // 2. Find Buttons / CTA
-  const buttons = doc.querySelectorAll('a.btn, a.button, a[style*="background"], button, a[href^="http"]');
-  let mainButton: HTMLAnchorElement | null = null;
+  try {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(html, 'text/html');
 
-  buttons.forEach((btn) => {
-    if (btn.tagName.toLowerCase() === 'a') {
-      const anchor = btn as HTMLAnchorElement;
-      const text = anchor.textContent?.trim();
-      if (text && text.length > 0 && !mainButton) {
-        mainButton = anchor;
+    // 1. Find Header Title
+    const h1 = doc.querySelector('h1, h2, header, .header, .banner');
+    if (h1) {
+      const text = getTextWithLineBreaks(h1);
+      if (text) result.headerTitle = text;
+      const styles = parseStylesAndAttrs(h1);
+      if (styles['color']) result.primaryColor = parseColor(styles['color']);
+      if (styles['background-color']) result.primaryColor = parseColor(styles['background-color']);
+    }
+
+    // 2. Find Buttons / CTA
+    const buttons = doc.querySelectorAll('a.btn, a.button, a[style*="background"], button, a[href^="http"]');
+    let mainButton: HTMLAnchorElement | null = null;
+
+    buttons.forEach((btn) => {
+      if (btn && btn.tagName && btn.tagName.toLowerCase() === 'a') {
+        const anchor = btn as HTMLAnchorElement;
+        const text = anchor.textContent?.trim();
+        if (text && text.length > 0 && !mainButton) {
+          mainButton = anchor;
+        }
+      }
+    });
+
+    if (mainButton) {
+      result.buttonText = (mainButton as HTMLAnchorElement).textContent?.trim() || 'Clique Aqui';
+      result.buttonUrl = (mainButton as HTMLAnchorElement).getAttribute('href') || '#';
+      const btnStyle = parseStylesAndAttrs(mainButton as HTMLAnchorElement);
+      if (btnStyle['background-color']) {
+        result.primaryColor = parseColor(btnStyle['background-color']);
       }
     }
-  });
 
-  if (mainButton) {
-    result.buttonText = (mainButton as HTMLAnchorElement).textContent?.trim() || 'Clique Aqui';
-    result.buttonUrl = (mainButton as HTMLAnchorElement).getAttribute('href') || '#';
-    const btnStyle = parseStylesAndAttrs(mainButton as HTMLAnchorElement);
-    if (btnStyle['background-color']) {
-      result.primaryColor = parseColor(btnStyle['background-color']);
+    // 3. Find Paragraphs / Body Text
+    const paragraphs = Array.from(doc.querySelectorAll('p, div, td')).filter((el) => {
+      if (!el || !el.children) return false;
+      const childTags = Array.from(el.children).map((c) => (c?.tagName || '').toLowerCase());
+      return !childTags.includes('h1') && !childTags.includes('h2') && !childTags.includes('table') && el.textContent && el.textContent.trim().length > 3;
+    });
+
+    const bodyTexts: string[] = [];
+    let greetingFound = false;
+    let footerFound = false;
+
+    paragraphs.forEach((p) => {
+      if (!p) return;
+      const text = getTextWithLineBreaks(p);
+      if (!text) return;
+
+      if (!greetingFound && (text.toLowerCase().startsWith('olá') || text.toLowerCase().startsWith('oi') || text.includes('{{nome}}'))) {
+        result.greeting = text;
+        greetingFound = true;
+        return;
+      }
+
+      if (
+        !footerFound &&
+        (text.toLowerCase().includes('©') ||
+          text.toLowerCase().includes('direitos reservados') ||
+          text.toLowerCase().includes('enviado para') ||
+          text.toLowerCase().includes('descadastrar'))
+      ) {
+        result.footerText = text;
+        footerFound = true;
+        return;
+      }
+
+      bodyTexts.push(text);
+    });
+
+    if (bodyTexts.length > 0) {
+      result.bodyText = bodyTexts.join('\n\n');
     }
-  }
-
-  // 3. Find Paragraphs / Body Text
-  const paragraphs = Array.from(doc.querySelectorAll('p, div, td')).filter((el) => {
-    const childTags = Array.from(el.children).map((c) => c.tagName.toLowerCase());
-    return !childTags.includes('h1') && !childTags.includes('h2') && !childTags.includes('table') && el.textContent && el.textContent.trim().length > 3;
-  });
-
-  const bodyTexts: string[] = [];
-  let greetingFound = false;
-  let footerFound = false;
-
-  paragraphs.forEach((p) => {
-    const text = getTextWithLineBreaks(p);
-    if (!text) return;
-
-    if (!greetingFound && (text.toLowerCase().startsWith('olá') || text.toLowerCase().startsWith('oi') || text.includes('{{nome}}'))) {
-      result.greeting = text;
-      greetingFound = true;
-      return;
-    }
-
-    if (
-      !footerFound &&
-      (text.toLowerCase().includes('©') ||
-        text.toLowerCase().includes('direitos reservados') ||
-        text.toLowerCase().includes('enviado para') ||
-        text.toLowerCase().includes('descadastrar'))
-    ) {
-      result.footerText = text;
-      footerFound = true;
-      return;
-    }
-
-    bodyTexts.push(text);
-  });
-
-  if (bodyTexts.length > 0) {
-    result.bodyText = bodyTexts.join('\n\n');
+  } catch (err) {
+    console.error('Erro seguro ao converter HTML para EmailData:', err);
   }
 
   return result;
 }
 
 /**
- * Parses an imported HTML string into an array of EmailBlock objects for Gerador PRO
+ * Parses an imported HTML string into an array of EmailBlock objects for Gerador PRO.
+ * Shielded against malformed HTML, empty inputs, circular references and unexpected nodes.
  */
-export function parseHtmlToBlocks(html: string): EmailBlock[] {
-  const parser = new DOMParser();
-  const doc = parser.parseFromString(html, 'text/html');
+export function parseHtmlToBlocks(html?: string | null): EmailBlock[] {
+  if (!html || typeof html !== 'string' || html.trim() === '') {
+    return [];
+  }
 
   const blocks: EmailBlock[] = [];
   let blockCounter = 1;
 
   const createId = (el?: Element | null) => {
-    if (el) {
+    if (el && typeof el.getAttribute === 'function') {
       const dataId = el.getAttribute('data-block-id');
       if (dataId) return dataId;
       if (el.id && el.id.startsWith('preview-block-')) {
@@ -875,8 +898,19 @@ export function parseHtmlToBlocks(html: string): EmailBlock[] {
     return `block-${blockCounter++}`;
   };
 
-  // Find primary email container or body
-  const rootContainer = doc.querySelector('.card') || doc.querySelector('table') || doc.body;
+  try {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(html, 'text/html');
+
+    if (!doc || !doc.body) {
+      return [];
+    }
+
+    // Find primary email container or body
+    const rootContainer = doc.querySelector('.card') || doc.querySelector('table') || doc.body;
+    if (!rootContainer) {
+      return [];
+    }
 
   const defaultDocFontFamily = extractDefaultFontFamilyFromDoc(doc) || 'Helvetica, Arial, sans-serif';
 
@@ -1285,4 +1319,17 @@ export function parseHtmlToBlocks(html: string): EmailBlock[] {
   }
 
   return blocks;
+  } catch (parseError) {
+    console.error('Falha segura durante a análise de blocos HTML:', parseError);
+    return [
+      {
+        id: 'block-fallback-1',
+        type: 'text',
+        text: 'Não foi possível carregar a estrutura original do e-mail. Adicione novos blocos para editar.',
+        fontSizePx: 15,
+        textColor: '#334155',
+        alignment: 'left',
+      },
+    ];
+  }
 }

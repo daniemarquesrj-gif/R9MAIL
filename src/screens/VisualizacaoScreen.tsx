@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { EmailData, Screen, TransitionType } from '../types';
-import { generateEmailHtml } from '../utils/htmlGenerator';
+import { compileEmailToHtml } from '../utils/compiler';
 
 interface VisualizacaoScreenProps {
   emailData: EmailData;
@@ -18,7 +18,7 @@ export const VisualizacaoScreen: React.FC<VisualizacaoScreenProps> = ({
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   const handleExportHtml = () => {
-    const htmlString = emailData.customCodeHtml || generateEmailHtml(emailData);
+    const htmlString = compileEmailToHtml(emailData);
     const blob = new Blob([htmlString], { type: 'text/html;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -105,7 +105,7 @@ export const VisualizacaoScreen: React.FC<VisualizacaoScreenProps> = ({
         >
           <iframe
             title="Visualização Fiel do E-mail"
-            srcDoc={emailData.customCodeHtml || generateEmailHtml(emailData)}
+            srcDoc={compileEmailToHtml(emailData)}
             className="w-full h-[620px] min-h-[580px] border-0 bg-white"
           />
         </div>
