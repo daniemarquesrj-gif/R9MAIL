@@ -27,6 +27,8 @@ export default function App() {
     footerText: defaultTmpl.footerText,
     primaryColor: defaultTmpl.primaryColor,
     activeTemplateId: defaultTmpl.id,
+    subject: defaultTmpl.headerTitle,
+    contentSource: 'html',
     customCodeHtml: defaultTmpl.customCodeHtml,
   });
 
@@ -74,7 +76,8 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen flex flex-col bg-background text-on-surface font-body-md">
+    <ErrorBoundary fallbackTitle="R9Bot Mailer" fallbackMessage="O aplicativo encontrou um erro inesperado. Seus dados salvos localmente permanecem protegidos. Tente novamente." resetLabel="Tentar novamente">
+      <div className={`flex flex-col bg-background text-on-surface font-body-md ${currentScreen === 'gerador_pro' ? 'h-screen overflow-hidden' : 'min-h-screen'}`}>
       {/* Shared Header */}
       <Header
         currentScreen={currentScreen}
@@ -83,7 +86,7 @@ export default function App() {
       />
 
       {/* Screen Content Container with Motion Animations */}
-      <main className="flex-grow flex flex-col relative w-full">
+      <main className="flex-grow flex flex-col relative w-full min-h-0">
         <AnimatePresence mode="wait">
           <motion.div
             key={currentScreen}
@@ -92,7 +95,7 @@ export default function App() {
             animate="animate"
             exit="exit"
             transition={{ duration: transitionType === 'none' ? 0.15 : 0.35, ease: 'easeInOut' }}
-            className="flex-grow flex flex-col w-full"
+            className="flex-grow flex flex-col w-full min-h-0"
           >
             {currentScreen === 'inicio' && (
               <InicioScreen onNavigate={handleNavigate} />
@@ -115,26 +118,27 @@ export default function App() {
             )}
 
             {currentScreen === 'gerador_pro' && (
-              <ErrorBoundary fallbackTitle="Editor de Blocos">
-                <GeradorProScreen
-                  emailData={emailData}
-                  setEmailData={setEmailData}
-                  onNavigate={handleNavigate}
-                />
-              </ErrorBoundary>
+              <GeradorProScreen
+                emailData={emailData}
+                setEmailData={setEmailData}
+                onNavigate={handleNavigate}
+              />
             )}
           </motion.div>
         </AnimatePresence>
       </main>
 
-      {/* Shared Footer */}
-      <Footer
-        onConcluir={
-          currentScreen !== 'visualizacao'
-            ? () => handleNavigate('visualizacao', 'push')
-            : undefined
-        }
-      />
-    </div>
+      {/* Shared Footer - hidden on gerador_pro to avoid overlapping full-height workspace */}
+      {currentScreen !== 'gerador_pro' && (
+        <Footer
+          onConcluir={
+            currentScreen !== 'visualizacao'
+              ? () => handleNavigate('visualizacao', 'push')
+              : undefined
+          }
+        />
+      )}
+      </div>
+    </ErrorBoundary>
   );
 }

@@ -107,3 +107,18 @@
 .transition-device {
   transition: max-width 0.4s cubic-bezier(0.4, 0, 0.2, 1);
 }
+
+/* Phase E — consistent keyboard focus and reduced-motion support */
+:where(button, a, input, textarea, select):focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

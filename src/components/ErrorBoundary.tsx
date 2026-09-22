@@ -5,6 +5,7 @@ interface Props {
   fallbackTitle?: string;
   fallbackMessage?: string;
   onReset?: () => void;
+  resetLabel?: string;
 }
 
 interface State {
@@ -52,7 +53,7 @@ export class ErrorBoundary extends Component<Props, State> {
                 {this.props.fallbackMessage ||
                   'Algum bloco ou estilo continha dados incompletos. Seus dados continuam salvos e você pode restaurar a visualização.'}
               </p>
-              {this.state.error && (
+              {import.meta.env.DEV && this.state.error && (
                 <p className="text-[11px] font-mono text-amber-900 bg-amber-100/60 p-2 rounded-lg break-all">
                   {this.state.error.message}
                 </p>
@@ -67,7 +68,7 @@ export class ErrorBoundary extends Component<Props, State> {
               className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs rounded-xl shadow-xs transition-all active:scale-95 flex items-center gap-1.5 cursor-pointer"
             >
               <span className="material-symbols-outlined text-[16px]">refresh</span>
-              <span>Recarregar Editor de Blocos</span>
+              <span>{this.props.resetLabel || 'Tentar novamente'}</span>
             </button>
           </div>
         </div>

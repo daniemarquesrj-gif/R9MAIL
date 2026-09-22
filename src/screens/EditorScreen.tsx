@@ -2,7 +2,9 @@ import React, { useState, useEffect, useRef } from 'react';
 import { EmailData, EmailTemplate, Screen, TransitionType } from '../types';
 import { DEFAULT_TEMPLATES } from '../data/templates';
 import { compileEmailToHtml } from '../utils/compiler';
-import { uploadToPublicHost, checkImageSize } from '../utils/imageUploader';
+import { uploadImage, checkImageSize } from '../utils/imageUploader';
+import { sanitizeEmailHtml } from '../utils/security';
+import { Toast } from '../components/ui/Toast';
 
 interface EditorScreenProps {
   emailData: EmailData;
@@ -30,6 +32,7 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
       if (prev.customCodeHtml === code) return prev;
       return {
         ...prev,
+        contentSource: 'html',
         customCodeHtml: code,
       };
     });
@@ -44,7 +47,7 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
     if (!file) return;
 
     if (!file.name.endsWith('.html') && !file.name.endsWith('.htm') && file.type !== 'text/html') {
-      alert('Por favor, selecione um arquivo de texto com extensão .html ou .htm');
+      setToastMessage('Por favor, selecione um arquivo HTML com extensão .html ou .htm.');
       return;
     }
 
@@ -52,17 +55,18 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
     reader.onload = (event) => {
       const content = event.target?.result as string;
       if (content) {
-        setCode(content);
+        const safeContent = sanitizeEmailHtml(content);
+        setCode(safeContent);
         setEmailData((prev) => ({
           ...prev,
-          customCodeHtml: content,
+          contentSource: 'html',
+          customCodeHtml: safeContent,
         }));
         setToastMessage(`Arquivo HTML "${file.name}" importado com sucesso!`);
-        setTimeout(() => setToastMessage(null), 3500);
       }
     };
     reader.onerror = () => {
-      alert('Ocorreu um erro ao ler o arquivo. Tente novamente.');
+      setToastMessage('Não foi possível ler o arquivo HTML. Tente novamente.');
     };
     reader.readAsText(file);
     // Reset file input value so user can upload the same file again if edited
@@ -74,13 +78,13 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
     if (!file) return;
 
     if (!file.type.startsWith('image/')) {
-      alert('Por favor, selecione um arquivo de imagem válido (PNG, JPG, WEBP, GIF).');
+      setToastMessage('Selecione uma imagem PNG, JPG, WEBP ou GIF.');
       return;
     }
 
     const sizeCheck = checkImageSize(file, 5);
     if (!sizeCheck.valid) {
-      alert(`⚠️ ${sizeCheck.message}`);
+      setToastMessage(`⚠️ ${sizeCheck.message}`);
       e.target.value = '';
       return;
     }
@@ -89,18 +93,17 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
     setToastMessage('🔥 Enviando imagem para o Firebase Storage...');
 
     try {
-      const res = await uploadToPublicHost(file, file.name);
+      const res = await uploadImage(file, file.name);
       const imgTag = `\n<img src="${res.url}" alt="${file.name.replace(/\.[^/.]+$/, '')}" style="max-width: 100%; height: auto; display: block; margin: 16px auto; border: 0; outline: none; border-radius: 6px;" />\n`;
       
       setCode((prev) => prev + imgTag);
       setToastMessage(res.message);
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Erro no upload de imagem:', err);
-      alert(err?.message || 'Não foi possível realizar o upload da imagem.');
+      setToastMessage(err instanceof Error ? err.message : 'Não foi possível realizar o upload da imagem.');
     } finally {
       setIsUploadingImage(false);
       e.target.value = '';
-      setTimeout(() => setToastMessage(null), 4000);
     }
   };
 
@@ -127,40 +130,37 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
       footerText: tmpl.footerText,
       primaryColor: tmpl.primaryColor,
       activeTemplateId: tmpl.id,
+      contentSource: 'html',
       customCodeHtml: newHtml,
     }));
 
     setToastMessage(`Modelo "${tmpl.name}" carregado com sucesso no editor!`);
-    setTimeout(() => setToastMessage(null), 3000);
   };
 
   return (
     <div className="flex-grow pt-16 pb-20 flex flex-col items-center w-full min-h-[calc(100vh-64px)] relative">
       {/* Toast Notification */}
       {toastMessage && (
-        <div className="fixed top-20 right-6 bg-emerald-600 text-white font-semibold px-4 py-3 rounded-lg shadow-xl z-50 flex items-center gap-2 animate-bounce">
-          <span className="material-symbols-outlined text-[20px]">check_circle</span>
-          <span>{toastMessage}</span>
-        </div>
+        <Toast message={toastMessage} onClose={() => setToastMessage(null)} />
       )}
       {/* Editor Toolbar */}
       <div className="w-full bg-white border-b border-slate-200 px-4 md:px-6 py-2.5 flex flex-wrap items-center gap-3 sticky top-16 z-30 shadow-xs">
         <div className="flex items-center space-x-1 border-r border-slate-200 pr-3">
-          <button 
+          <button type="button"
             onClick={() => setCode((prev) => prev + ' <b>Texto em Negrito</b> ')}
             className="p-1.5 rounded hover:bg-slate-100 transition-colors text-slate-600 hover:text-blue-600" 
             title="Negrito"
           >
             <span className="material-symbols-outlined text-[20px]">format_bold</span>
           </button>
-          <button 
+          <button type="button"
             onClick={() => setCode((prev) => prev + ' <i>Texto em Itálico</i> ')}
             className="p-1.5 rounded hover:bg-slate-100 transition-colors text-slate-600 hover:text-blue-600" 
             title="Itálico"
           >
             <span className="material-symbols-outlined text-[20px]">format_italic</span>
           </button>
-          <button 
+          <button type="button"
             onClick={() => setCode((prev) => prev + ' <u>Texto Sublinhado</u> ')}
             className="p-1.5 rounded hover:bg-slate-100 transition-colors text-slate-600 hover:text-blue-600" 
             title="Sublinhado"
@@ -169,60 +169,39 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
           </button>
         </div>
 
-        <div className="flex items-center space-x-1 border-r border-slate-200 pr-3">
-          <button className="p-1.5 rounded hover:bg-slate-100 transition-colors text-slate-600">
-            <span className="material-symbols-outlined text-[20px]">format_align_left</span>
-          </button>
-          <button className="p-1.5 rounded hover:bg-slate-100 transition-colors text-slate-600">
-            <span className="material-symbols-outlined text-[20px]">format_align_center</span>
-          </button>
-          <button className="p-1.5 rounded hover:bg-slate-100 transition-colors text-slate-600">
-            <span className="material-symbols-outlined text-[20px]">format_align_right</span>
-          </button>
-        </div>
-
-        <div className="flex items-center gap-1 border-r border-slate-200 pr-3">
-          <button className="p-1.5 rounded hover:bg-slate-100 transition-colors text-slate-600">
-            <span className="material-symbols-outlined text-[20px]">format_list_bulleted</span>
-          </button>
-          <button className="p-1.5 rounded hover:bg-slate-100 transition-colors text-slate-600">
-            <span className="material-symbols-outlined text-[20px]">link</span>
-          </button>
-        </div>
-
         <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-1">
           <span className="text-xs font-medium text-slate-500 flex items-center gap-1">
             <span className="material-symbols-outlined text-sm">swipe_left</span> Variáveis:
           </span>
-          <button
+          <button type="button"
             onClick={() => insertVariable('{{nome}}')}
             className="bg-blue-50 px-2 py-1 rounded border border-blue-200 text-xs font-mono text-blue-700 font-semibold hover:bg-blue-100 transition-colors shrink-0"
             title="Inserir {{nome}}"
           >
             &#123;&#123;nome&#125;&#125;
           </button>
-          <button
+          <button type="button"
             onClick={() => insertVariable('{{email}}')}
             className="bg-blue-50 px-2 py-1 rounded border border-blue-200 text-xs font-mono text-blue-700 font-semibold hover:bg-blue-100 transition-colors shrink-0"
             title="Inserir {{email}}"
           >
             &#123;&#123;email&#125;&#125;
           </button>
-          <button
+          <button type="button"
             onClick={() => insertVariable('{{var1}}')}
             className="bg-blue-50 px-2 py-1 rounded border border-blue-200 text-xs font-mono text-blue-700 font-semibold hover:bg-blue-100 transition-colors shrink-0"
             title="Inserir {{var1}}"
           >
             &#123;&#123;var1&#125;&#125;
           </button>
-          <button
+          <button type="button"
             onClick={() => insertVariable('{{var2}}')}
             className="bg-blue-50 px-2 py-1 rounded border border-blue-200 text-xs font-mono text-blue-700 font-semibold hover:bg-blue-100 transition-colors shrink-0"
             title="Inserir {{var2}}"
           >
             &#123;&#123;var2&#125;&#125;
           </button>
-          <button
+          <button type="button"
             onClick={() => insertVariable('{{var3}}')}
             className="bg-blue-50 px-2 py-1 rounded border border-blue-200 text-xs font-mono text-blue-700 font-semibold hover:bg-blue-100 transition-colors shrink-0"
             title="Inserir {{var3}}"
@@ -250,7 +229,7 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
             className="hidden"
           />
 
-          <button
+          <button type="button"
             onClick={() => imageInputRef.current?.click()}
             disabled={isUploadingImage}
             className="bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-semibold px-3 py-1.5 rounded-md border border-indigo-300 transition-all text-xs flex items-center gap-1.5 shadow-2xs active:scale-95 disabled:opacity-50"
@@ -265,7 +244,7 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
             <span className="sm:hidden">Imagem</span>
           </button>
 
-          <button
+          <button type="button"
             onClick={() => fileInputRef.current?.click()}
             className="bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-semibold px-3 py-1.5 rounded-md border border-emerald-300 transition-all text-xs flex items-center gap-1.5 shadow-2xs active:scale-95"
             title="Importar um arquivo HTML do computador para edição"
@@ -300,7 +279,7 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
             </button>
           </div>
 
-          <button
+          <button type="button"
             onClick={() => onNavigate('visualizacao', 'push')}
             className="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-3 py-1.5 rounded-md transition-all text-xs flex items-center gap-1.5 shadow-xs active:scale-95"
             title="Ir para tela de Visualização"
@@ -361,7 +340,7 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({
             </div>
             <div 
               className="p-2 sm:p-4 overflow-x-auto"
-              dangerouslySetInnerHTML={{ __html: code }}
+              dangerouslySetInnerHTML={{ __html: sanitizeEmailHtml(code) }}
             />
           </div>
         </div>

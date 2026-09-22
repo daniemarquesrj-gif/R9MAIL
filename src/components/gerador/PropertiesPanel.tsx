@@ -1,7 +1,34 @@
-import React from 'react';
-import { EmailBlock, BlockType } from '../../types';
-import { RichTextEditor } from '../RichTextEditor';
-import { FormattingToolbar } from './FormattingToolbar';
+import React, { useRef, useState } from 'react';
+import { EmailBlock, BlockType, EmailData } from '../../types';
+import { RichTextEditor, RichTextEditorRef } from '../RichTextEditor';
+import { LinkEditorModal } from './LinkEditorModal';
+import {
+  Settings,
+  Type,
+  Palette,
+  Layout,
+  Code2,
+  ChevronDown,
+  ChevronRight,
+  Copy,
+  Trash2,
+  X,
+  Upload,
+  Link,
+  Sparkles,
+  Bold,
+  Italic,
+  Underline,
+  Strikethrough,
+  AlignLeft,
+  AlignCenter,
+  AlignRight,
+  AlignJustify,
+  Sliders,
+  CheckCircle2,
+  ExternalLink,
+  ShieldCheck,
+} from 'lucide-react';
 
 interface PropertiesPanelProps {
   selectedBlock: EmailBlock | null;
@@ -28,15 +55,85 @@ interface PropertiesPanelProps {
   onRemoveLink: () => void;
   handleOpenLinkModal: () => void;
   handleDuplicate: (block: EmailBlock) => void;
+  handleDeleteBlock: (id: string) => void;
+  onCloseSelection: () => void;
   handleAddBlock: (type: BlockType) => void;
   handleTextSelectOrChange: (e: any, fieldName: string) => void;
-  activeEditorRef: React.RefObject<any>;
+  activeEditorRef: React.MutableRefObject<RichTextEditorRef | null>;
   imageFileInputRef: React.RefObject<HTMLInputElement | null>;
   handleImageBlockUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
   handleNormalizeExistingImage: () => void;
-  handleUploadExistingToPublicHost: () => void;
+  handleUploadExistingImage: () => void;
   isNormalizing: boolean;
+  emailData?: EmailData;
+  setEmailData?: React.Dispatch<React.SetStateAction<EmailData>>;
 }
+
+const COLOR_PRESETS = [
+  '#003bb3', // Estácio Blue
+  '#4f46e5', // Indigo
+  '#0284c7', // Sky
+  '#059669', // Emerald
+  '#d97706', // Amber
+  '#e11d48', // Rose
+  '#1e293b', // Slate 800
+  '#475569', // Slate 600
+  '#ffffff', // White
+  '#f8fafc', // Slate 50
+  '#f1f5f9', // Slate 100
+  '#000000', // Black
+];
+
+interface SelectableRichTextFieldProps {
+  value: string;
+  onChange: (value: string) => void;
+  placeholder?: string;
+  minHeight?: string;
+  activeEditorRef: React.MutableRefObject<RichTextEditorRef | null>;
+  onFocus?: () => void;
+}
+
+const SelectableRichTextField: React.FC<SelectableRichTextFieldProps> = ({
+  value,
+  onChange,
+  placeholder,
+  minHeight = '72px',
+  activeEditorRef,
+  onFocus,
+}) => {
+  const localRef = useRef<RichTextEditorRef | null>(null);
+
+  return (
+    <div className="border border-slate-300 rounded-xl overflow-hidden focus-within:ring-2 focus-within:ring-indigo-500/20 focus-within:border-indigo-500">
+      <RichTextEditor
+        ref={localRef}
+        value={value}
+        onChange={onChange}
+        onFocus={() => {
+          activeEditorRef.current = localRef.current;
+          onFocus?.();
+        }}
+        onBlur={() => {
+          if (activeEditorRef.current === localRef.current) {
+            activeEditorRef.current = null;
+          }
+        }}
+        placeholder={placeholder}
+        minHeight={minHeight}
+        className="p-3 text-xs leading-relaxed focus:outline-none bg-white"
+      />
+    </div>
+  );
+};
+
+const FONT_FAMILIES = [
+  { label: 'Helvetica / Arial', value: 'Helvetica, Arial, sans-serif' },
+  { label: 'Georgia (Serif)', value: 'Georgia, serif' },
+  { label: 'Times New Roman', value: "'Times New Roman', Times, serif" },
+  { label: 'Trebuchet MS', value: "'Trebuchet MS', sans-serif" },
+  { label: 'Verdana', value: 'Verdana, sans-serif' },
+  { label: 'Courier New (Mono)', value: "'Courier New', Courier, monospace" },
+];
 
 export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
   selectedBlock,
@@ -54,896 +151,1033 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
   onRemoveLink,
   handleOpenLinkModal,
   handleDuplicate,
+  handleDeleteBlock,
+  onCloseSelection,
   handleAddBlock,
   handleTextSelectOrChange,
   activeEditorRef,
   imageFileInputRef,
   handleImageBlockUpload,
   handleNormalizeExistingImage,
-  handleUploadExistingToPublicHost,
+  handleUploadExistingImage,
   isNormalizing,
+  emailData,
+  setEmailData,
 }) => {
+  // Accordion open/close states
+  const [openSections, setOpenSections] = useState({
+    content: true,
+    style: true,
+    layout: false,
+    advanced: false,
+  });
+
+  const toggleSection = (section: keyof typeof openSections) => {
+    setOpenSections((prev) => ({ ...prev, [section]: !prev[section] }));
+  };
+
+  // Plain-text paste protection for single-line text inputs (Title, Header, etc.)
+  const handlePlainTextPaste = (
+    e: React.ClipboardEvent<HTMLInputElement | HTMLTextAreaElement>,
+    fieldKey: keyof EmailBlock
+  ) => {
+    e.preventDefault();
+    const plainText = e.clipboardData.getData('text/plain');
+    if (!plainText) return;
+
+    const target = e.currentTarget;
+    const start = target.selectionStart || 0;
+    const end = target.selectionEnd || 0;
+    const currentVal = String((selectedBlock as any)?.[fieldKey] || '');
+
+    const newVal = currentVal.substring(0, start) + plainText + currentVal.substring(end);
+    updateSelectedBlock({ [fieldKey]: newVal });
+
+    // Restores cursor position
+    setTimeout(() => {
+      target.selectionStart = target.selectionEnd = start + plainText.length;
+    }, 0);
+  };
+
+  // If NO block is selected: Show Global Email Settings
   if (!selectedBlock) {
     return (
-      <div className="bg-slate-50 border border-dashed border-slate-300 rounded-xl p-8 text-center space-y-3">
-        <span className="material-symbols-outlined text-[36px] text-slate-400">touch_app</span>
-        <p className="text-sm font-bold text-slate-700">Nenhum bloco selecionado para edição</p>
-        <p className="text-xs text-slate-500 max-w-sm mx-auto">
-          Clique em um bloco na lista acima ou adicione um novo bloco pelo botão <strong>+ Adicionar Bloco</strong>.
-        </p>
-        <button
-          type="button"
-          onClick={() => handleAddBlock('text')}
-          className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl shadow-xs inline-flex items-center gap-1.5 cursor-pointer"
-        >
-          <span className="material-symbols-outlined text-[16px]">add</span>
-          <span>Adicionar Primeiro Bloco</span>
-        </button>
+      <div className="w-full h-full flex flex-col bg-white border-l border-slate-200/90 select-none overflow-hidden">
+        <div className="p-4 border-b border-slate-200/80 bg-slate-50/70 shrink-0">
+          <div className="flex items-center gap-2 text-slate-800">
+            <Settings className="w-4 h-4 text-indigo-600" />
+            <h3 className="text-xs font-bold uppercase tracking-wider">
+              Configurações do E-mail
+            </h3>
+          </div>
+          <p className="text-[11px] text-slate-500 mt-1">
+            Propriedades gerais do documento. Selecione qualquer bloco no canvas para personalizá-lo.
+          </p>
+        </div>
+
+        <div className="p-4 space-y-5 flex-grow overflow-y-auto min-h-0">
+          {/* Email subject */}
+          {emailData && setEmailData && (
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-slate-700 block">Assunto do E-mail:</label>
+              <input
+                type="text"
+                value={emailData.subject || ''}
+                onChange={(e) => setEmailData((prev) => ({ ...prev, subject: e.target.value }))}
+                placeholder="Ex: Condições especiais de matrícula"
+                className="w-full text-xs p-2.5 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 bg-white"
+              />
+            </div>
+          )}
+
+          {/* Visual email title */}
+          {emailData && setEmailData && (
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-slate-700 block">Título visual do e-mail:</label>
+              <input
+                type="text"
+                value={emailData.headerTitle || ''}
+                onChange={(e) => setEmailData((prev) => ({ ...prev, headerTitle: e.target.value }))}
+                placeholder="Ex: Sua matrícula começa aqui"
+                className="w-full text-xs p-2.5 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 bg-white"
+              />
+            </div>
+          )}
+
+          {/* Primary Color Palette */}
+          {emailData && setEmailData && (
+            <div className="space-y-2">
+              <label className="text-xs font-bold text-slate-700 block">
+                Cor Primária da Marca:
+              </label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="color"
+                  value={emailData.primaryColor || '#003bb3'}
+                  onChange={(e) => setEmailData((prev) => ({ ...prev, primaryColor: e.target.value }))}
+                  className="w-8 h-8 rounded-lg cursor-pointer border border-slate-300 p-0.5"
+                />
+                <input
+                  type="text"
+                  value={emailData.primaryColor || '#003bb3'}
+                  onChange={(e) => setEmailData((prev) => ({ ...prev, primaryColor: e.target.value }))}
+                  className="w-24 text-xs font-mono p-1.5 rounded-lg border border-slate-300 uppercase"
+                />
+              </div>
+
+              {/* Color chips */}
+              <div className="flex items-center gap-1.5 flex-wrap pt-1">
+                {COLOR_PRESETS.slice(0, 8).map((color) => (
+                  <button
+                    key={color}
+                    type="button"
+                    onClick={() => setEmailData((prev) => ({ ...prev, primaryColor: color }))}
+                    className="w-5 h-5 rounded-md border border-slate-300 transition-transform hover:scale-110 cursor-pointer shadow-2xs"
+                    style={{ backgroundColor: color }}
+                    title={color}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Tips Card */}
+          <div className="p-3.5 bg-indigo-50/50 border border-indigo-100 rounded-xl space-y-2">
+            <div className="flex items-center gap-2 text-indigo-700 text-xs font-bold">
+              <Sparkles className="w-3.5 h-3.5" />
+              <span>Dica de Produtividade</span>
+            </div>
+            <p className="text-[11px] text-slate-600 leading-relaxed">
+              Você pode clicar diretamente em qualquer texto ou bloco dentro da visualização para abrir instantaneamente as suas opções de edição.
+            </p>
+          </div>
+        </div>
       </div>
     );
   }
 
-  const getBlockName = (type: BlockType) => {
-    const labels: Record<BlockType, string> = {
-      header_text: 'Texto do Cabeçalho / Banner',
+  const getBlockTitle = (type: BlockType) => {
+    const titles: Record<BlockType, string> = {
+      header_text: 'Cabeçalho / Banner',
       header: 'Cabeçalho Simples',
       header_image: 'Imagem do Cabeçalho',
-      title: 'Título',
+      title: 'Título Principal',
       subtitle: 'Subtítulo',
       text: 'Texto / Parágrafo',
       button: 'Botão CTA',
       image: 'Banner / Imagem',
       coupon: 'Cupom de Desconto',
-      divider: 'Divisor',
+      divider: 'Linha Divisória',
       social: 'Redes Sociais',
-      footer: 'Rodapé',
+      footer: 'Rodapé Legal',
     };
-    return labels[type] || type;
+    return titles[type] || type;
   };
 
-  const renderToolbar = (options?: any) => (
-    <FormattingToolbar
-      selectedBlock={selectedBlock}
-      updateSelectedBlock={updateSelectedBlock}
-      applyFormattingToSelection={applyFormattingToSelection}
-      insertVariableToSelectedBlock={insertVariableToSelectedBlock}
-      activeSelection={activeSelection}
-      linkModalOpen={linkModalOpen}
-      setLinkModalOpen={setLinkModalOpen}
-      linkText={linkText}
-      setLinkText={setLinkText}
-      linkUrl={linkUrl}
-      setLinkUrl={setLinkUrl}
-      onSaveLink={onSaveLink}
-      onRemoveLink={onRemoveLink}
-      handleOpenLinkModal={handleOpenLinkModal}
-      options={options}
-    />
-  );
-
   return (
-    <div className="bg-slate-50 border border-slate-200 rounded-xl p-5 md:p-6 space-y-5">
-      {/* Panel Header */}
-      <div className="flex items-center justify-between flex-wrap gap-2 border-b border-slate-200 pb-3">
-        <h2 className="text-sm font-extrabold uppercase text-slate-800 tracking-wider flex items-center gap-2">
-          <span className="bg-indigo-600 text-white w-5 h-5 rounded-full text-[11px] flex items-center justify-center font-bold">2</span>
-          <span>Editando Bloco: {getBlockName(selectedBlock.type)}</span>
-        </h2>
+    <div className="w-full h-full flex flex-col bg-white border-l border-slate-200/90 select-none overflow-hidden">
+      {/* Panel Top Header with Block Name & Quick Actions */}
+      <div className="p-3.5 border-b border-slate-200/80 bg-slate-50/80 flex items-center justify-between gap-2 shrink-0">
+        <div className="flex items-center gap-2 min-w-0">
+          <div className="w-7 h-7 rounded-lg bg-indigo-100 text-indigo-700 flex items-center justify-center shrink-0">
+            <Sliders className="w-3.5 h-3.5" />
+          </div>
+          <div className="min-w-0">
+            <h3 className="text-xs font-bold text-slate-900 truncate">
+              {getBlockTitle(selectedBlock.type)}
+            </h3>
+            <span className="text-[10px] text-slate-400 font-mono">
+              ID: {selectedBlock.id}
+            </span>
+          </div>
+        </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1 shrink-0">
           <button
             type="button"
             onClick={() => handleDuplicate(selectedBlock)}
-            className="px-2.5 py-1 bg-white hover:bg-slate-50 text-slate-700 hover:text-indigo-600 border border-slate-200 rounded-lg text-xs font-bold transition-all flex items-center gap-1 shadow-2xs cursor-pointer"
+            className="p-1.5 text-slate-500 hover:text-indigo-600 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
             title="Duplicar este bloco"
           >
-            <span className="material-symbols-outlined text-[16px] text-slate-500">content_copy</span>
-            <span>Duplicar</span>
+            <Copy className="w-3.5 h-3.5" />
+          </button>
+          <button
+            type="button"
+            onClick={() => handleDeleteBlock(selectedBlock.id)}
+            className="p-1.5 text-slate-500 hover:text-rose-600 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
+            title="Excluir este bloco"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+          </button>
+          <button
+            type="button"
+            onClick={onCloseSelection}
+            className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
+            title="Fechar propriedades"
+          >
+            <X className="w-3.5 h-3.5" />
           </button>
         </div>
       </div>
 
-      {/* HEADER / HEADER_TEXT FORM */}
-      {(selectedBlock.type === 'header' || selectedBlock.type === 'header_text') && (
-        <div className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">
-                Título Principal do Cabeçalho
-              </label>
-              <RichTextEditor
-                key={`${selectedBlock.id}-headerTitle`}
-                ref={activeEditorRef}
-                value={selectedBlock.headerTitle || ''}
-                onChange={(newVal) => updateSelectedBlock({ headerTitle: newVal })}
-                placeholder="Ex: ESTÁCIO - SUA MATRÍCULA COMEÇA AQUI!"
-                minHeight="70px"
-              />
+      {/* Accordion List */}
+      <div className="divide-y divide-slate-100 flex-grow overflow-y-auto min-h-0">
+        {/* =========================================================================
+            SECTION 1: CONTEÚDO (Content)
+        ========================================================================= */}
+        <div className="border-b border-slate-100">
+          <button
+            type="button"
+            onClick={() => toggleSection('content')}
+            className="w-full px-4 py-3 flex items-center justify-between text-xs font-bold text-slate-800 hover:bg-slate-50/80 transition-colors cursor-pointer"
+          >
+            <div className="flex items-center gap-2">
+              <Type className="w-3.5 h-3.5 text-indigo-600" />
+              <span>1. Conteúdo do Bloco</span>
             </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">
-                Subtítulo / Texto Complementar do Cabeçalho
-              </label>
-              <RichTextEditor
-                key={`${selectedBlock.id}-headerSubtitle`}
-                ref={activeEditorRef}
-                value={selectedBlock.headerSubtitle || ''}
-                onChange={(newVal) => updateSelectedBlock({ headerSubtitle: newVal })}
-                placeholder="Ex: Condições especiais para estudar na Estácio R9 – Taquara"
-                minHeight="70px"
-              />
-            </div>
-          </div>
+            {openSections.content ? (
+              <ChevronDown className="w-4 h-4 text-slate-400" />
+            ) : (
+              <ChevronRight className="w-4 h-4 text-slate-400" />
+            )}
+          </button>
 
-          <div className="bg-white border border-slate-200 p-4 rounded-xl space-y-3 shadow-2xs">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-2">
-              <span className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
-                <span className="material-symbols-outlined text-[18px] text-indigo-600">subtitles</span>
-                <span>Estilização do Subtítulo / Texto Complementar</span>
-              </span>
-              <span className="text-[11px] font-extrabold text-indigo-700 bg-indigo-50 border border-indigo-200 px-2.5 py-0.5 rounded-md font-mono">
-                {selectedBlock.headerSubtitleSizePx || 16}px
-              </span>
-            </div>
+          {openSections.content && (
+            <div className="px-4 pb-4 pt-1 space-y-4 text-xs animate-fadeIn">
+              {/* Header Text / Header Block */}
+              {(selectedBlock.type === 'header' || selectedBlock.type === 'header_text') && (
+                <div className="space-y-3">
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="font-bold text-slate-700">Título do Cabeçalho:</label>
+                      <span className="text-[10px] text-slate-400">Suporta quebra de linha</span>
+                    </div>
+                    <SelectableRichTextField
+                      activeEditorRef={activeEditorRef}
+                      value={selectedBlock.headerTitle || ''}
+                      onChange={(value) => updateSelectedBlock({ headerTitle: value })}
+                      placeholder="ESTÁCIO — SUA MATRÍCULA COMEÇA AQUI!"
+                      minHeight="90px"
+                    />
+                  </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-start">
-              <div className="space-y-2">
-                <label className="block text-[11px] font-bold text-slate-600">
-                  Tamanho Fixo do Subtítulo:
-                </label>
-                <div className="flex items-center gap-1.5 flex-wrap">
-                  {[12, 14, 15, 16, 18, 20, 22, 24, 28].map((sz) => (
-                    <button
-                      key={sz}
-                      type="button"
-                      onClick={() => updateSelectedBlock({ headerSubtitleSizePx: sz })}
-                      className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all border cursor-pointer ${
-                        (selectedBlock.headerSubtitleSizePx || 16) === sz
-                          ? 'bg-indigo-600 text-white font-bold border-indigo-700 shadow-xs'
-                          : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200'
-                      }`}
-                    >
-                      {sz}px
-                    </button>
-                  ))}
+                  <div>
+                    <label className="font-bold text-slate-700 block mb-1">Subtítulo / Apoio:</label>
+                    <SelectableRichTextField
+                      activeEditorRef={activeEditorRef}
+                      value={selectedBlock.headerSubtitle || ''}
+                      onChange={(value) => updateSelectedBlock({ headerSubtitle: value })}
+                      placeholder="Condições especiais para estudar na Estácio R9"
+                      minHeight="70px"
+                    />
+                  </div>
                 </div>
-                <select
-                  value={selectedBlock.headerSubtitleSizePx || 16}
-                  onChange={(e) => {
-                    const val = Number(e.target.value);
-                    if (!isNaN(val)) updateSelectedBlock({ headerSubtitleSizePx: val });
-                  }}
-                  className="w-full text-xs p-1.5 border border-slate-300 rounded-lg bg-slate-50 font-medium text-slate-800 focus:bg-white cursor-pointer mt-1"
-                >
-                  <option value={12}>12px - Discreto / Rodapé de Banner</option>
-                  <option value={14}>14px - Compacto</option>
-                  <option value={15}>15px - Padrão Leitura</option>
-                  <option value={16}>16px - Padrão Médio</option>
-                  <option value={18}>18px - Subtítulo Destacado</option>
-                  <option value={20}>20px - Subtítulo Forte</option>
-                  <option value={22}>22px - Destaque Principal</option>
-                  <option value={24}>24px - Grande Impacto</option>
-                  <option value={28}>28px - Máximo Destaque</option>
-                </select>
-              </div>
+              )}
 
-              <div className="space-y-1.5">
-                <label className="block text-[11px] font-bold text-slate-600">Cor do Subtítulo:</label>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="color"
-                    value={selectedBlock.headerSubtitleColor || '#ffffff'}
-                    onChange={(e) => updateSelectedBlock({ headerSubtitleColor: e.target.value })}
-                    className="w-9 h-8 p-0.5 border border-slate-300 rounded cursor-pointer bg-white"
+              {/* Title Block */}
+              {selectedBlock.type === 'title' && (
+                <div className="space-y-1.5">
+                  <label className="font-bold text-slate-700 block">Texto do Título:</label>
+                  <SelectableRichTextField
+                    activeEditorRef={activeEditorRef}
+                    value={selectedBlock.text || ''}
+                    onChange={(value) => updateSelectedBlock({ text: value })}
+                    placeholder="Novidades Exclusivas para {{empresa}}"
                   />
-                  <span className="text-xs font-mono uppercase text-slate-600 font-bold">{selectedBlock.headerSubtitleColor || '#ffffff'}</span>
-                  <div className="flex gap-1 ml-1 flex-wrap">
-                    {['#ffffff', '#e0e7ff', '#fef08a', '#93c5fd', '#1e1b4b', '#f97316'].map((hex) => (
+                </div>
+              )}
+
+              {/* Subtitle Block */}
+              {selectedBlock.type === 'subtitle' && (
+                <div className="space-y-1.5">
+                  <label className="font-bold text-slate-700 block">Texto do Subtítulo:</label>
+                  <SelectableRichTextField
+                    activeEditorRef={activeEditorRef}
+                    value={selectedBlock.text || ''}
+                    onChange={(value) => updateSelectedBlock({ text: value })}
+                    placeholder="Olá {{nome}}, temos uma atualização especial"
+                  />
+                </div>
+              )}
+
+              {/* Rich Paragraph Text Block (With Guaranteed Plain-Text Paste Handler) */}
+              {selectedBlock.type === 'text' && (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="font-bold text-slate-700">Corpo do Texto:</label>
+                    <span className="text-[10px] text-emerald-600 font-semibold flex items-center gap-1">
+                      <ShieldCheck className="w-3 h-3" />
+                      <span>Limpeza de formatação ativa</span>
+                    </span>
+                  </div>
+
+                  <SelectableRichTextField
+                    activeEditorRef={activeEditorRef}
+                    value={selectedBlock.text || ''}
+                    onChange={(newHtml) => updateSelectedBlock({ text: newHtml })}
+                    placeholder="Escreva seu parágrafo aqui... Cole textos da web sem receio de formatação quebrada."
+                    minHeight="140px"
+                  />
+                </div>
+              )}
+
+              {/* Button CTA Block */}
+              {selectedBlock.type === 'button' && (
+                <div className="space-y-3">
+                  <div>
+                    <label className="font-bold text-slate-700 block mb-1">Rótulo do Botão:</label>
+                    <SelectableRichTextField
+                      activeEditorRef={activeEditorRef}
+                      value={selectedBlock.buttonLabel || ''}
+                      onChange={(value) => updateSelectedBlock({ buttonLabel: value })}
+                      placeholder="Conhecer Plataforma Agora"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="font-bold text-slate-700 block mb-1">Link de Destino (URL):</label>
+                    <div className="relative">
+                      <input
+                        type="url"
+                        value={selectedBlock.buttonUrl || ''}
+                        onChange={(e) => updateSelectedBlock({ buttonUrl: e.target.value })}
+                        placeholder="https://exemplo.com.br"
+                        className="w-full p-2.5 pr-8 rounded-lg border border-slate-300 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 text-xs font-mono"
+                      />
+                      <ExternalLink className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-3" />
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Image / Banner Block */}
+              {selectedBlock.type === 'image' && (
+                <div className="space-y-3">
+                  {/* Hidden image input for upload */}
+                  <input
+                    type="file"
+                    ref={imageFileInputRef}
+                    onChange={handleImageBlockUpload}
+                    accept="image/png,image/jpeg,image/webp,image/gif"
+                    className="hidden"
+                  />
+
+                  {/* Image Preview or Placeholder */}
+                  {selectedBlock.imageUrl ? (
+                    <div className="space-y-2">
+                      <div className="border border-slate-200 rounded-xl overflow-hidden bg-slate-50 p-2 text-center">
+                        <img
+                          src={selectedBlock.imageUrl}
+                          alt={selectedBlock.imageAlt || 'Preview'}
+                          className="max-h-36 mx-auto object-contain rounded-lg shadow-2xs"
+                        />
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => imageFileInputRef.current?.click()}
+                          className="flex-1 py-1.5 px-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-lg text-xs transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+                        >
+                          <Upload className="w-3.5 h-3.5" />
+                          <span>Trocar Imagem</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={handleNormalizeExistingImage}
+                          disabled={isNormalizing}
+                          className="py-1.5 px-2.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-semibold rounded-lg text-xs transition-colors flex items-center gap-1 cursor-pointer"
+                          title="Otimizar tamanho e dimensões para clientes de e-mail"
+                        >
+                          <CheckCircle2 className="w-3.5 h-3.5" />
+                          <span>{isNormalizing ? 'Otimizando...' : 'Normalizar'}</span>
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div
+                      onClick={() => imageFileInputRef.current?.click()}
+                      className="border-2 border-dashed border-slate-300 hover:border-indigo-400 rounded-xl p-6 text-center cursor-pointer bg-slate-50/50 hover:bg-indigo-50/30 transition-all space-y-2"
+                    >
+                      <Upload className="w-8 h-8 text-slate-400 mx-auto" />
+                      <p className="font-bold text-slate-700 text-xs">Fazer upload de imagem</p>
+                      <p className="text-[10px] text-slate-400">
+                        PNG, JPG ou WEBP até 5MB (Upload para Firebase / Nuvem)
+                      </p>
+                    </div>
+                  )}
+
+                  <div>
+                    <label className="font-bold text-slate-700 block mb-1">URL Direta da Imagem:</label>
+                    <input
+                      type="url"
+                      value={selectedBlock.imageUrl || ''}
+                      onChange={(e) => updateSelectedBlock({ imageUrl: e.target.value })}
+                      placeholder="https://exemplo.com/imagem.png"
+                      className="w-full p-2 rounded-lg border border-slate-300 focus:ring-2 focus:ring-indigo-500/20 text-xs font-mono"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="font-bold text-slate-700 block mb-1">Texto Alternativo (Alt):</label>
+                    <input
+                      type="text"
+                      value={selectedBlock.imageAlt || ''}
+                      onChange={(e) => updateSelectedBlock({ imageAlt: e.target.value })}
+                      placeholder="Descrição da imagem para acessibilidade"
+                      className="w-full p-2 rounded-lg border border-slate-300 text-xs"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="font-bold text-slate-700 block mb-1">Link ao Clicar (Opcional):</label>
+                    <input
+                      type="url"
+                      value={selectedBlock.imageLink || ''}
+                      onChange={(e) => updateSelectedBlock({ imageLink: e.target.value })}
+                      placeholder="https://exemplo.com/promocao"
+                      className="w-full p-2 rounded-lg border border-slate-300 text-xs font-mono"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Coupon Block */}
+              {selectedBlock.type === 'coupon' && (
+                <div className="space-y-3">
+                  <div>
+                    <label className="font-bold text-slate-700 block mb-1">Código do Cupom:</label>
+                    <input
+                      type="text"
+                      value={selectedBlock.couponCode || ''}
+                      onChange={(e) => updateSelectedBlock({ couponCode: e.target.value.toUpperCase() })}
+                      onPaste={(e) => handlePlainTextPaste(e, 'couponCode')}
+                      placeholder="EX: ESTACIO30OFF"
+                      className="w-full p-2.5 rounded-lg border border-slate-300 text-xs font-mono font-bold uppercase tracking-wider"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="font-bold text-slate-700 block mb-1">Descrição do Desconto:</label>
+                    <input
+                      type="text"
+                      value={selectedBlock.couponDiscount || ''}
+                      onChange={(e) => updateSelectedBlock({ couponDiscount: e.target.value })}
+                      onPaste={(e) => handlePlainTextPaste(e, 'couponDiscount')}
+                      placeholder="30% DE DESCONTO NO PLANO ANUAL"
+                      className="w-full p-2.5 rounded-lg border border-slate-300 text-xs font-semibold"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Divider Block */}
+              {selectedBlock.type === 'divider' && (
+                <div className="space-y-2">
+                  <label className="font-bold text-slate-700 block">Estilo da Linha:</label>
+                  <div className="grid grid-cols-3 gap-1.5">
+                    {(['solid', 'dashed', 'dotted'] as const).map((style) => (
                       <button
-                        key={hex}
+                        key={style}
                         type="button"
-                        onClick={() => updateSelectedBlock({ headerSubtitleColor: hex })}
-                        className="w-5 h-5 rounded-full border border-slate-300 hover:scale-110 transition-transform shadow-2xs cursor-pointer"
-                        style={{ backgroundColor: hex }}
-                        title={`Cor: ${hex}`}
+                        onClick={() => updateSelectedBlock({ dividerStyle: style })}
+                        className={`py-1.5 text-xs font-semibold rounded-lg border capitalize transition-all cursor-pointer ${
+                          selectedBlock.dividerStyle === style
+                            ? 'bg-indigo-50 border-indigo-500 text-indigo-700 font-bold'
+                            : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                        }`}
+                      >
+                        {style === 'solid' ? 'Sólido' : style === 'dashed' ? 'Tracejado' : 'Pontilhado'}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Social Media Block */}
+              {selectedBlock.type === 'social' && (
+                <div className="space-y-2.5">
+                  <p className="text-[11px] text-slate-500">
+                    Insira as URLs das redes da sua empresa:
+                  </p>
+                  <div>
+                    <label className="font-bold text-slate-700 block mb-0.5 text-[11px]">Instagram:</label>
+                    <input
+                      type="url"
+                      value={selectedBlock.instagramUrl || ''}
+                      onChange={(e) => updateSelectedBlock({ instagramUrl: e.target.value })}
+                      placeholder="https://instagram.com/suaempresa"
+                      className="w-full p-2 rounded-lg border border-slate-300 text-xs font-mono"
+                    />
+                  </div>
+                  <div>
+                    <label className="font-bold text-slate-700 block mb-0.5 text-[11px]">WhatsApp:</label>
+                    <input
+                      type="url"
+                      value={selectedBlock.whatsappUrl || ''}
+                      onChange={(e) => updateSelectedBlock({ whatsappUrl: e.target.value })}
+                      placeholder="https://wa.me/5521999999999"
+                      className="w-full p-2 rounded-lg border border-slate-300 text-xs font-mono"
+                    />
+                  </div>
+                  <div>
+                    <label className="font-bold text-slate-700 block mb-0.5 text-[11px]">LinkedIn:</label>
+                    <input
+                      type="url"
+                      value={selectedBlock.linkedinUrl || ''}
+                      onChange={(e) => updateSelectedBlock({ linkedinUrl: e.target.value })}
+                      placeholder="https://linkedin.com/company/suaempresa"
+                      className="w-full p-2 rounded-lg border border-slate-300 text-xs font-mono"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Footer Block */}
+              {selectedBlock.type === 'footer' && (
+                <div className="space-y-2">
+                  <label className="font-bold text-slate-700 block">Texto do Rodapé:</label>
+                  <SelectableRichTextField
+                    activeEditorRef={activeEditorRef}
+                    value={selectedBlock.footerText || ''}
+                    onChange={(value) => updateSelectedBlock({ footerText: value })}
+                    placeholder="Você está recebendo este e-mail..."
+                    minHeight="100px"
+                  />
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* =========================================================================
+            SECTION 2: ESTILO & CORES (Style & Typography)
+        ========================================================================= */}
+        <div className="border-b border-slate-100">
+          <button
+            type="button"
+            onClick={() => toggleSection('style')}
+            className="w-full px-4 py-3 flex items-center justify-between text-xs font-bold text-slate-800 hover:bg-slate-50/80 transition-colors cursor-pointer"
+          >
+            <div className="flex items-center gap-2">
+              <Palette className="w-3.5 h-3.5 text-indigo-600" />
+              <span>2. Estilo, Cores & Tipografia</span>
+            </div>
+            {openSections.style ? (
+              <ChevronDown className="w-4 h-4 text-slate-400" />
+            ) : (
+              <ChevronRight className="w-4 h-4 text-slate-400" />
+            )}
+          </button>
+
+          {openSections.style && (
+            <div className="px-4 pb-4 pt-1 space-y-4 text-xs animate-fadeIn">
+              {/* Color Customization */}
+              {selectedBlock.type !== 'divider' && (
+                <div className="space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <label className="font-bold text-slate-700">Cor do Texto / Título:</label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="color"
+                        value={
+                          selectedBlock.headerTextColor ||
+                          selectedBlock.buttonTextColor ||
+                          selectedBlock.footerTextColor ||
+                          selectedBlock.textColor ||
+                          '#1e293b'
+                        }
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          if (selectedBlock.type === 'header' || selectedBlock.type === 'header_text') {
+                            updateSelectedBlock({ headerTextColor: val });
+                          } else if (selectedBlock.type === 'button') {
+                            updateSelectedBlock({ buttonTextColor: val });
+                          } else if (selectedBlock.type === 'footer') {
+                            updateSelectedBlock({ footerTextColor: val });
+                          } else {
+                            updateSelectedBlock({ textColor: val });
+                          }
+                        }}
+                        className="w-6 h-6 rounded cursor-pointer border border-slate-300 p-0"
+                      />
+                      <span className="font-mono text-[11px] text-slate-500 uppercase">
+                        {selectedBlock.headerTextColor ||
+                          selectedBlock.buttonTextColor ||
+                          selectedBlock.footerTextColor ||
+                          selectedBlock.textColor ||
+                          '#1e293b'}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Preset quick colors */}
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    {COLOR_PRESETS.map((color) => (
+                      <button
+                        key={color}
+                        type="button"
+                        onClick={() => {
+                          if (selectedBlock.type === 'header' || selectedBlock.type === 'header_text') {
+                            updateSelectedBlock({ headerTextColor: color });
+                          } else if (selectedBlock.type === 'button') {
+                            updateSelectedBlock({ buttonTextColor: color });
+                          } else if (selectedBlock.type === 'footer') {
+                            updateSelectedBlock({ footerTextColor: color });
+                          } else {
+                            updateSelectedBlock({ textColor: color });
+                          }
+                        }}
+                        className="w-5 h-5 rounded-md border border-slate-300 hover:scale-110 transition-transform cursor-pointer shadow-2xs"
+                        style={{ backgroundColor: color }}
+                        title={color}
                       />
                     ))}
                   </div>
                 </div>
-              </div>
-            </div>
-          </div>
-
-          {renderToolbar({
-            defaultColorKey: 'headerTextColor',
-            defaultBgKey: 'headerBgColor',
-          })}
-        </div>
-      )}
-
-      {/* HEADER IMAGE FORM */}
-      {selectedBlock.type === 'header_image' && (
-        <div className="space-y-4">
-          <input
-            type="file"
-            ref={imageFileInputRef}
-            onChange={handleImageBlockUpload}
-            accept="image/*"
-            className="hidden"
-          />
-
-          <details className="group bg-slate-100/90 border border-slate-200/90 rounded-xl overflow-hidden transition-all shadow-2xs">
-            <summary className="px-3.5 py-2.5 text-xs font-bold text-slate-700 hover:text-indigo-600 flex items-center justify-between cursor-pointer select-none">
-              <span className="flex items-center gap-2">
-                <span className="material-symbols-outlined text-[18px] text-indigo-600">info</span>
-                <span>Dicas de Tamanho e Medidas Recomendadas ℹ️ (600 x 200px)</span>
-              </span>
-              <span className="material-symbols-outlined text-[18px] text-slate-400 group-open:rotate-180 transition-transform">
-                expand_more
-              </span>
-            </summary>
-            <div className="p-3.5 border-t border-slate-200/80 bg-white space-y-2.5 text-xs">
-              <div className="grid grid-cols-3 gap-2 text-center">
-                <div className="bg-slate-50 p-2 rounded-lg border border-slate-200">
-                  <span className="text-[10px] font-bold text-slate-500 uppercase block">Largura Ideal</span>
-                  <span className="text-xs font-black text-indigo-600">600 px</span>
-                  <span className="text-[9px] text-slate-400 block">(100% da caixa)</span>
-                </div>
-                <div className="bg-slate-50 p-2 rounded-lg border border-slate-200">
-                  <span className="text-[10px] font-bold text-slate-500 uppercase block">Altura</span>
-                  <span className="text-xs font-black text-amber-600">150–250 px</span>
-                  <span className="text-[9px] text-slate-400 block">(Proporção ~3:1)</span>
-                </div>
-                <div className="bg-slate-50 p-2 rounded-lg border border-slate-200">
-                  <span className="text-[10px] font-bold text-slate-500 uppercase block">Formato</span>
-                  <span className="text-xs font-black text-slate-700">PNG / JPG</span>
-                  <span className="text-[9px] text-slate-400 block">(Até 5MB)</span>
-                </div>
-              </div>
-              <p className="text-[11px] text-slate-600 leading-relaxed bg-indigo-50/50 p-2 rounded-lg border border-indigo-100">
-                💡 A largura de 600px cobre todo o topo da caixa de entrada perfeitamente no Gmail, Outlook, Apple Mail e celular sem ficar borrada ou cortada.
-              </p>
-            </div>
-          </details>
-
-          <div className="bg-white border border-slate-200 p-4 rounded-xl space-y-3 shadow-2xs">
-            <div className="flex items-center justify-between flex-wrap gap-2">
-              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
-                <span className="material-symbols-outlined text-[18px] text-indigo-600">view_day</span>
-                <span>Imagem Banner de Cabeçalho</span>
-              </label>
-              {selectedBlock.imageUrl && (
-                selectedBlock.imageUrl.includes('firebasestorage') ? (
-                  <span className="text-[11px] font-semibold text-amber-800 bg-amber-50 px-2.5 py-0.5 rounded-full border border-amber-300 flex items-center gap-1">
-                    <span className="material-symbols-outlined text-[14px] text-amber-600">local_fire_department</span>
-                    Firebase Storage — URL Pública
-                  </span>
-                ) : selectedBlock.imageUrl.startsWith('http://') || selectedBlock.imageUrl.startsWith('https://') ? (
-                  <span className="text-[11px] font-semibold text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200 flex items-center gap-1">
-                    <span className="material-symbols-outlined text-[14px]">check_circle</span>
-                    URL HTTPS Pública
-                  </span>
-                ) : (
-                  <span className="text-[11px] font-semibold text-amber-700 bg-amber-50 px-2.5 py-0.5 rounded-full border border-amber-200 flex items-center gap-1">
-                    <span className="material-symbols-outlined text-[14px]">warning</span>
-                    Imagem em Base64 Local
-                  </span>
-                )
               )}
-            </div>
 
-            {/* Upload & Normalization Action Area */}
-            <div className="bg-indigo-50/60 p-3.5 rounded-xl border border-indigo-100 space-y-2">
-              <div className="flex flex-wrap items-center gap-2.5">
-                <button
-                  type="button"
-                  disabled={isNormalizing}
-                  onClick={() => imageFileInputRef.current?.click()}
-                  className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-bold text-xs rounded-xl shadow-2xs transition-all active:scale-95 flex items-center justify-center gap-2 cursor-pointer"
-                >
-                  <span className="material-symbols-outlined text-[18px]">
-                    {isNormalizing ? 'sync' : 'upload_file'}
-                  </span>
-                  <span>{isNormalizing ? 'Processando...' : 'Fazer Upload do Cabeçalho'}</span>
-                </button>
-
-                {selectedBlock.imageUrl && (
-                  <button
-                    type="button"
-                    disabled={isNormalizing}
-                    onClick={handleNormalizeExistingImage}
-                    className="px-3.5 py-2.5 bg-white hover:bg-slate-50 text-indigo-700 font-bold text-xs rounded-xl border border-indigo-200 shadow-2xs transition-all active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer"
-                    title="Redimensiona e otimiza para 600px de largura"
-                  >
-                    <span className="material-symbols-outlined text-[16px] text-indigo-600">tune</span>
-                    <span>Otimizar para 600px</span>
-                  </button>
-                )}
-              </div>
-
-              <p className="text-xs text-indigo-950/80 font-medium leading-relaxed flex items-center gap-1.5 pt-1 border-t border-indigo-100/80">
-                <span className="material-symbols-outlined text-[16px] text-indigo-600 shrink-0">verified</span>
-                <span>Geramos automaticamente a URL pública HTTPS necessária para exibição garantida no Gmail e Outlook.</span>
-              </p>
-            </div>
-
-            {/* Base64 Warning */}
-            {selectedBlock.imageUrl?.startsWith('data:') && (
-              <div className="bg-amber-50 border border-amber-200 rounded-xl p-3.5 space-y-2">
-                <div className="flex items-start gap-2.5">
-                  <span className="material-symbols-outlined text-[20px] text-amber-600 shrink-0 mt-0.5">warning</span>
-                  <div className="text-xs text-amber-900 leading-relaxed">
-                    <p className="font-bold">Atenção ao usar Base64 no cabeçalho:</p>
-                    <p className="mt-0.5 text-amber-800">
-                      Provedores de e-mail bloqueiam imagens codificadas em Base64. Clique abaixo para gerar o link público HTTPS.
-                    </p>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  disabled={isNormalizing}
-                  onClick={handleUploadExistingToPublicHost}
-                  className="w-full px-4 py-2 bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white font-bold text-xs rounded-lg shadow-2xs transition-all active:scale-95 flex items-center justify-center gap-2 cursor-pointer"
-                >
-                  <span className="material-symbols-outlined text-[18px]">cloud_upload</span>
-                  <span>{isNormalizing ? 'Gerando URL pública...' : 'Hospedar em Link Público (Fixar para Gmail)'}</span>
-                </button>
-              </div>
-            )}
-
-            {/* Image Preview Box */}
-            {selectedBlock.imageUrl && (
-              <div className="bg-slate-100 border border-slate-200 rounded-xl p-3 flex items-center justify-between gap-3">
-                <div className="flex items-center gap-3 min-w-0">
-                  <div className="w-20 h-12 rounded-lg bg-white border border-slate-200 flex items-center justify-center overflow-hidden shrink-0 shadow-2xs relative">
-                    <img
-                      src={selectedBlock.imageUrl}
-                      alt={selectedBlock.imageAlt || 'Cabeçalho'}
-                      className="max-w-full max-h-full object-cover"
-                      onError={(e) => {
-                        (e.target as HTMLElement).style.display = 'none';
-                      }}
-                    />
-                  </div>
-                  <div className="min-w-0 text-xs">
+              {/* Background Color Customization (for Header, Button, Coupon, Footer, Divider) */}
+              {(selectedBlock.type === 'header' ||
+                selectedBlock.type === 'header_text' ||
+                selectedBlock.type === 'button' ||
+                selectedBlock.type === 'coupon' ||
+                selectedBlock.type === 'footer' ||
+                selectedBlock.type === 'divider') && (
+                <div className="space-y-2.5 pt-2 border-t border-slate-100">
+                  <div className="flex items-center justify-between">
+                    <label className="font-bold text-slate-700">
+                      {selectedBlock.type === 'divider' ? 'Cor da Linha:' : 'Cor de Fundo:'}
+                    </label>
                     <div className="flex items-center gap-2">
-                      <p className="font-bold text-slate-800 truncate">
-                        {selectedBlock.imageAlt || 'Cabeçalho do E-mail'}
-                      </p>
-                      <span className="text-[10px] bg-indigo-100 text-indigo-800 px-1.5 py-0.5 rounded font-bold">
-                        600px Largura
+                      <input
+                        type="color"
+                        value={
+                          selectedBlock.headerBgColor ||
+                          selectedBlock.buttonBgColor ||
+                          selectedBlock.couponBgColor ||
+                          selectedBlock.footerBgColor ||
+                          selectedBlock.dividerColor ||
+                          '#4f46e5'
+                        }
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          if (selectedBlock.type === 'header' || selectedBlock.type === 'header_text') {
+                            updateSelectedBlock({ headerBgColor: val });
+                          } else if (selectedBlock.type === 'button') {
+                            updateSelectedBlock({ buttonBgColor: val });
+                          } else if (selectedBlock.type === 'coupon') {
+                            updateSelectedBlock({ couponBgColor: val });
+                          } else if (selectedBlock.type === 'footer') {
+                            updateSelectedBlock({ footerBgColor: val });
+                          } else if (selectedBlock.type === 'divider') {
+                            updateSelectedBlock({ dividerColor: val });
+                          }
+                        }}
+                        className="w-6 h-6 rounded cursor-pointer border border-slate-300 p-0"
+                      />
+                      <span className="font-mono text-[11px] text-slate-500 uppercase">
+                        {selectedBlock.headerBgColor ||
+                          selectedBlock.buttonBgColor ||
+                          selectedBlock.couponBgColor ||
+                          selectedBlock.footerBgColor ||
+                          selectedBlock.dividerColor ||
+                          '#4f46e5'}
                       </span>
                     </div>
-                    <p className="text-[11px] text-slate-500 font-mono truncate max-w-xs md:max-w-md">
-                      {selectedBlock.imageUrl.length > 60
-                        ? `${selectedBlock.imageUrl.substring(0, 60)}...`
-                        : selectedBlock.imageUrl}
-                    </p>
+                  </div>
+
+                  {/* Preset quick colors for background */}
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    {COLOR_PRESETS.map((color) => (
+                      <button
+                        key={color}
+                        type="button"
+                        onClick={() => {
+                          if (selectedBlock.type === 'header' || selectedBlock.type === 'header_text') {
+                            updateSelectedBlock({ headerBgColor: color });
+                          } else if (selectedBlock.type === 'button') {
+                            updateSelectedBlock({ buttonBgColor: color });
+                          } else if (selectedBlock.type === 'coupon') {
+                            updateSelectedBlock({ couponBgColor: color });
+                          } else if (selectedBlock.type === 'footer') {
+                            updateSelectedBlock({ footerBgColor: color });
+                          } else if (selectedBlock.type === 'divider') {
+                            updateSelectedBlock({ dividerColor: color });
+                          }
+                        }}
+                        className="w-5 h-5 rounded-md border border-slate-300 hover:scale-110 transition-transform cursor-pointer shadow-2xs"
+                        style={{ backgroundColor: color }}
+                        title={color}
+                      />
+                    ))}
                   </div>
                 </div>
-
-                <div className="flex items-center gap-2 shrink-0">
-                  <button
-                    type="button"
-                    onClick={() => updateSelectedBlock({ imageUrl: '' })}
-                    className="px-2.5 py-1.5 bg-red-50 hover:bg-red-100 text-red-600 font-bold text-xs rounded-lg border border-red-200 transition-colors flex items-center gap-1 cursor-pointer"
-                    title="Remover Imagem"
-                  >
-                    <span className="material-symbols-outlined text-[16px]">delete</span>
-                    <span>Remover</span>
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {/* URL input */}
-            <div>
-              <label className="block text-[11px] font-bold text-slate-600 mb-1">
-                Ou digite/cole a URL da imagem de cabeçalho:
-              </label>
-              <input
-                type="text"
-                value={selectedBlock.imageUrl || ''}
-                onChange={(e) => updateSelectedBlock({ imageUrl: e.target.value })}
-                placeholder="https://sua-empresa.com/cabecalho-600x200.jpg"
-                className="w-full text-xs p-2.5 border border-slate-300 rounded-lg bg-white font-mono"
-              />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">
-                Link ao Clicar no Cabeçalho (Opcional)
-              </label>
-              <input
-                type="text"
-                value={selectedBlock.imageLink || ''}
-                onChange={(e) => updateSelectedBlock({ imageLink: e.target.value })}
-                placeholder="https://seusite.com"
-                className="w-full text-xs p-2.5 border border-slate-300 rounded-lg bg-white"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">Texto Alternativo (Alt)</label>
-              <input
-                type="text"
-                value={selectedBlock.imageAlt || ''}
-                onChange={(e) => updateSelectedBlock({ imageAlt: e.target.value })}
-                placeholder="Ex: Cabeçalho Estácio Taquara"
-                className="w-full text-xs p-2.5 border border-slate-300 rounded-lg bg-white"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">Legenda Opcional</label>
-              <input
-                type="text"
-                value={selectedBlock.imageCaption || ''}
-                onChange={(e) => updateSelectedBlock({ imageCaption: e.target.value })}
-                placeholder="Ex: Edição Especial de Agosto"
-                className="w-full text-xs p-2.5 border border-slate-300 rounded-lg bg-white"
-              />
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* TITLE FORM */}
-      {selectedBlock.type === 'title' && (
-        <div className="space-y-4">
-          <div>
-            <label className="block text-xs font-bold text-slate-700 mb-1">Texto do Título</label>
-            <RichTextEditor
-              key={`${selectedBlock.id}-title`}
-              ref={activeEditorRef}
-              value={selectedBlock.text || ''}
-              onChange={(newVal) => updateSelectedBlock({ text: newVal })}
-              placeholder="Digite o título..."
-              minHeight="50px"
-              style={{
-                color: selectedBlock.textColor || '#1e1b4b',
-                fontSize: selectedBlock.fontSizePx ? `${selectedBlock.fontSizePx}px` : undefined,
-              }}
-            />
-          </div>
-          {renderToolbar()}
-        </div>
-      )}
-
-      {/* SUBTITLE FORM */}
-      {selectedBlock.type === 'subtitle' && (
-        <div className="space-y-4">
-          <div>
-            <label className="block text-xs font-bold text-slate-700 mb-1">Texto do Subtítulo</label>
-            <RichTextEditor
-              key={`${selectedBlock.id}-subtitle`}
-              ref={activeEditorRef}
-              value={selectedBlock.text || ''}
-              onChange={(newVal) => updateSelectedBlock({ text: newVal })}
-              placeholder="Digite o subtítulo..."
-              minHeight="50px"
-              style={{
-                color: selectedBlock.textColor || '#475569',
-                fontSize: selectedBlock.fontSizePx ? `${selectedBlock.fontSizePx}px` : undefined,
-              }}
-            />
-          </div>
-          {renderToolbar()}
-        </div>
-      )}
-
-      {/* TEXT FORM */}
-      {selectedBlock.type === 'text' && (
-        <div className="space-y-4">
-          <div>
-            <label className="block text-xs font-bold text-slate-700 mb-1">Conteúdo do Parágrafo</label>
-            <RichTextEditor
-              key={`${selectedBlock.id}-text`}
-              ref={activeEditorRef}
-              value={selectedBlock.text || ''}
-              onChange={(newVal) => updateSelectedBlock({ text: newVal })}
-              placeholder="Digite o conteúdo do parágrafo..."
-              minHeight="120px"
-              style={{
-                color: selectedBlock.textColor || '#334155',
-                fontSize: selectedBlock.fontSizePx ? `${selectedBlock.fontSizePx}px` : undefined,
-              }}
-            />
-          </div>
-          {renderToolbar()}
-        </div>
-      )}
-
-      {/* BUTTON FORM */}
-      {selectedBlock.type === 'button' && (
-        <div className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">Texto do Botão</label>
-              <input
-                type="text"
-                value={selectedBlock.buttonLabel || ''}
-                onChange={(e) => {
-                  updateSelectedBlock({ buttonLabel: e.target.value });
-                  handleTextSelectOrChange(e, 'buttonLabel');
-                }}
-                onSelect={(e) => handleTextSelectOrChange(e, 'buttonLabel')}
-                onKeyUp={(e) => handleTextSelectOrChange(e, 'buttonLabel')}
-                onMouseUp={(e) => handleTextSelectOrChange(e, 'buttonLabel')}
-                onFocus={(e) => handleTextSelectOrChange(e, 'buttonLabel')}
-                className="w-full text-xs p-2.5 border border-slate-300 rounded-lg bg-white font-bold"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">Link de Destino (URL)</label>
-              <input
-                type="text"
-                value={selectedBlock.buttonUrl || ''}
-                onChange={(e) => updateSelectedBlock({ buttonUrl: e.target.value })}
-                className="w-full text-xs p-2.5 border border-slate-300 rounded-lg bg-white"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">Formato e Largura do Botão</label>
-              <select
-                value={selectedBlock.buttonWidth || 'auto'}
-                onChange={(e) => updateSelectedBlock({ buttonWidth: e.target.value as any })}
-                className="w-full text-xs p-2.5 border border-slate-300 rounded-lg bg-white cursor-pointer"
-              >
-                <option value="auto">Arredondado Centralizado (Padrão CTA)</option>
-                <option value="full">100% da Largura (Preencher Bloco Inteiro)</option>
-              </select>
-            </div>
-          </div>
-
-          {renderToolbar({
-            defaultColorKey: 'buttonTextColor',
-            defaultBgKey: 'buttonBgColor',
-            showBgColor: true,
-          })}
-        </div>
-      )}
-
-      {/* IMAGE FORM */}
-      {selectedBlock.type === 'image' && (
-        <div className="space-y-4">
-          <input
-            type="file"
-            ref={imageFileInputRef}
-            onChange={handleImageBlockUpload}
-            accept="image/*"
-            className="hidden"
-          />
-
-          <div className="bg-white border border-slate-200 p-4 rounded-xl space-y-3 shadow-2xs">
-            <div className="flex items-center justify-between flex-wrap gap-2">
-              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
-                <span className="material-symbols-outlined text-[18px] text-indigo-600">image</span>
-                <span>Imagem / Banner do E-mail</span>
-              </label>
-              {selectedBlock.imageUrl && (
-                selectedBlock.imageUrl.includes('firebasestorage') ? (
-                  <span className="text-[11px] font-semibold text-amber-800 bg-amber-50 px-2.5 py-0.5 rounded-full border border-amber-300 flex items-center gap-1">
-                    <span className="material-symbols-outlined text-[14px] text-amber-600">local_fire_department</span>
-                    Firebase Storage (/emails/) — URL Pública vinculada ao HTML
-                  </span>
-                ) : selectedBlock.imageUrl.startsWith('http://') || selectedBlock.imageUrl.startsWith('https://') ? (
-                  <span className="text-[11px] font-semibold text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200 flex items-center gap-1">
-                    <span className="material-symbols-outlined text-[14px]">check_circle</span>
-                    URL HTTPS Pública (Compatível com Gmail/Outlook)
-                  </span>
-                ) : (
-                  <span className="text-[11px] font-semibold text-amber-700 bg-amber-50 px-2.5 py-0.5 rounded-full border border-amber-200 flex items-center gap-1">
-                    <span className="material-symbols-outlined text-[14px]">warning</span>
-                    Imagem em Base64 Local (Pode ser bloqueada no Gmail)
-                  </span>
-                )
               )}
-            </div>
 
-            {/* Upload & Normalization Action Area */}
-            <div className="bg-indigo-50/60 p-3.5 rounded-xl border border-indigo-100 space-y-2">
-              <div className="flex flex-wrap items-center gap-2.5">
-                <button
-                  type="button"
-                  disabled={isNormalizing}
-                  onClick={() => imageFileInputRef.current?.click()}
-                  className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-bold text-xs rounded-xl shadow-2xs transition-all active:scale-95 flex items-center justify-center gap-2 cursor-pointer"
-                >
-                  <span className="material-symbols-outlined text-[18px]">
-                    {isNormalizing ? 'sync' : 'upload_file'}
-                  </span>
-                  <span>{isNormalizing ? 'Processando...' : 'Fazer Upload de Imagem'}</span>
-                </button>
-
-                {selectedBlock.imageUrl && (
-                  <button
-                    type="button"
-                    disabled={isNormalizing}
-                    onClick={handleNormalizeExistingImage}
-                    className="px-3.5 py-2.5 bg-white hover:bg-slate-50 text-indigo-700 font-bold text-xs rounded-xl border border-indigo-200 shadow-2xs transition-all active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer"
-                    title="Redimensiona e otimiza para ficar visível em qualquer celular e PC"
-                  >
-                    <span className="material-symbols-outlined text-[16px] text-indigo-600">tune</span>
-                    <span>Ajustar Dimensões Celular/PC</span>
-                  </button>
-                )}
-              </div>
-
-              <p className="text-xs text-indigo-950/80 font-medium leading-relaxed flex items-center gap-1.5 pt-1 border-t border-indigo-100/80">
-                <span className="material-symbols-outlined text-[16px] text-indigo-600 shrink-0">verified</span>
-                <span>Suporta PNG, JPG, WEBP, GIF (Até 5MB). Geramos link HTTPS automático para exibição garantida no Gmail e Outlook.</span>
-              </p>
-            </div>
-
-            {/* Base64 Gmail Explanation */}
-            {selectedBlock.imageUrl?.startsWith('data:') && (
-              <div className="bg-amber-50 border border-amber-200 rounded-xl p-3.5 space-y-2">
-                <div className="flex items-start gap-2.5">
-                  <span className="material-symbols-outlined text-[20px] text-amber-600 shrink-0 mt-0.5">warning</span>
-                  <div className="text-xs text-amber-900 leading-relaxed">
-                    <p className="font-bold">Por que imagens em Base64 somem ao receber o e-mail?</p>
-                    <p className="mt-0.5 text-amber-800">
-                      Provedores como <strong>Gmail, Outlook e Yahoo</strong> bloqueiam imagens codificadas localmente em Base64 (<code>data:image/...</code>) por política de segurança. Para garantir que ela apareça na caixa de entrada dos leitores, hospede em um link público HTTPS!
-                    </p>
+              {/* Typography Size Slider & Number Input */}
+              {selectedBlock.type !== 'divider' && selectedBlock.type !== 'image' && selectedBlock.type !== 'social' && (
+                <div className="space-y-2 pt-2 border-t border-slate-100">
+                  <div className="flex items-center justify-between">
+                    <label className="font-bold text-slate-700">Tamanho da Fonte:</label>
+                    <span className="font-mono font-bold text-indigo-600">
+                      {selectedBlock.fontSizePx || 16}px
+                    </span>
                   </div>
-                </div>
-                <button
-                  type="button"
-                  disabled={isNormalizing}
-                  onClick={handleUploadExistingToPublicHost}
-                  className="w-full px-4 py-2 bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white font-bold text-xs rounded-lg shadow-2xs transition-all active:scale-95 flex items-center justify-center gap-2 cursor-pointer"
-                >
-                  <span className="material-symbols-outlined text-[18px]">cloud_upload</span>
-                  <span>{isNormalizing ? 'Gerando URL pública...' : 'Hospedar em Link Público (Fixar para Gmail/Outlook)'}</span>
-                </button>
-              </div>
-            )}
 
-            {/* Image Preview Box */}
-            {selectedBlock.imageUrl && (
-              <div className="bg-slate-100 border border-slate-200 rounded-xl p-3 flex items-center justify-between gap-3">
-                <div className="flex items-center gap-3 min-w-0">
-                  <div className="w-16 h-14 rounded-lg bg-white border border-slate-200 flex items-center justify-center overflow-hidden shrink-0 shadow-2xs relative">
-                    <img
-                      src={selectedBlock.imageUrl}
-                      alt={selectedBlock.imageAlt || 'Preview'}
-                      className="max-w-full max-h-full object-contain"
-                      onError={(e) => {
-                        (e.target as HTMLElement).style.display = 'none';
-                      }}
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="range"
+                      min={10}
+                      max={48}
+                      value={selectedBlock.fontSizePx || 16}
+                      onChange={(e) => updateSelectedBlock({ fontSizePx: Number(e.target.value) })}
+                      className="flex-grow accent-indigo-600 cursor-pointer"
+                    />
+                    <input
+                      type="number"
+                      min={10}
+                      max={48}
+                      value={selectedBlock.fontSizePx || 16}
+                      onChange={(e) => updateSelectedBlock({ fontSizePx: Number(e.target.value) })}
+                      className="w-14 p-1 rounded-md border border-slate-300 text-center font-mono text-xs"
                     />
                   </div>
-                  <div className="min-w-0 text-xs">
-                    <div className="flex items-center gap-2">
-                      <p className="font-bold text-slate-800 truncate">
-                        {selectedBlock.imageAlt || 'Imagem Selecionada'}
-                      </p>
-                      <span className="text-[10px] bg-slate-200 text-slate-700 px-1.5 py-0.5 rounded font-medium">
-                        Visível em Celular e PC
-                      </span>
-                    </div>
-                    <p className="text-[11px] text-slate-500 font-mono truncate max-w-xs md:max-w-md">
-                      {selectedBlock.imageUrl.length > 60
-                        ? `${selectedBlock.imageUrl.substring(0, 60)}...`
-                        : selectedBlock.imageUrl}
-                    </p>
+                </div>
+              )}
+
+              {/* Text Alignment Controls */}
+              {selectedBlock.type !== 'divider' && selectedBlock.type !== 'image' && (
+                <div className="space-y-1.5 pt-2 border-t border-slate-100">
+                  <label className="font-bold text-slate-700 block">Alinhamento:</label>
+                  <div className="grid grid-cols-4 gap-1 bg-slate-100 p-1 rounded-lg">
+                    {[
+                      { align: 'left', icon: <AlignLeft className="w-3.5 h-3.5" />, title: 'Esquerda' },
+                      { align: 'center', icon: <AlignCenter className="w-3.5 h-3.5" />, title: 'Centro' },
+                      { align: 'right', icon: <AlignRight className="w-3.5 h-3.5" />, title: 'Direita' },
+                      { align: 'justify', icon: <AlignJustify className="w-3.5 h-3.5" />, title: 'Justificado' },
+                    ].map((item) => (
+                      <button
+                        key={item.align}
+                        type="button"
+                        onClick={() => updateSelectedBlock({ alignment: item.align as any })}
+                        className={`py-1.5 rounded-md flex items-center justify-center transition-all cursor-pointer ${
+                          (selectedBlock.alignment || 'left') === item.align
+                            ? 'bg-white text-indigo-700 shadow-2xs font-bold'
+                            : 'text-slate-600 hover:text-slate-900'
+                        }`}
+                        title={item.title}
+                      >
+                        {item.icon}
+                      </button>
+                    ))}
                   </div>
                 </div>
+              )}
 
-                <div className="flex items-center gap-2 shrink-0">
-                  <button
-                    type="button"
-                    onClick={() => updateSelectedBlock({ imageUrl: '' })}
-                    className="px-2.5 py-1.5 bg-red-50 hover:bg-red-100 text-red-600 font-bold text-xs rounded-lg border border-red-200 transition-colors flex items-center gap-1 cursor-pointer"
-                    title="Remover Imagem"
+              {/* Text Style Toggles (Bold, Italic, Underline, Strikethrough) */}
+              {selectedBlock.type !== 'divider' && selectedBlock.type !== 'image' && (
+                <div className="space-y-1.5 pt-2 border-t border-slate-100">
+                  <label className="font-bold text-slate-700 block">Estilo do Texto:</label>
+                  <div className="grid grid-cols-4 gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => applyFormattingToSelection('bold')}
+                      className={`p-1.5 rounded-lg border text-xs font-bold flex items-center justify-center gap-1 transition-all cursor-pointer ${
+                        selectedBlock.isBold
+                          ? 'bg-indigo-50 border-indigo-500 text-indigo-700'
+                          : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                      }`}
+                      title="Negrito"
+                    >
+                      <Bold className="w-3.5 h-3.5" />
+                      <span>B</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => applyFormattingToSelection('italic')}
+                      className={`p-1.5 rounded-lg border text-xs font-medium italic flex items-center justify-center gap-1 transition-all cursor-pointer ${
+                        selectedBlock.isItalic
+                          ? 'bg-indigo-50 border-indigo-500 text-indigo-700'
+                          : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                      }`}
+                      title="Itálico"
+                    >
+                      <Italic className="w-3.5 h-3.5" />
+                      <span>I</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => applyFormattingToSelection('underline')}
+                      className={`p-1.5 rounded-lg border text-xs underline flex items-center justify-center gap-1 transition-all cursor-pointer ${
+                        selectedBlock.isUnderline
+                          ? 'bg-indigo-50 border-indigo-500 text-indigo-700'
+                          : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                      }`}
+                      title="Sublinhado"
+                    >
+                      <Underline className="w-3.5 h-3.5" />
+                      <span>U</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => applyFormattingToSelection('strikethrough')}
+                      className={`p-1.5 rounded-lg border text-xs line-through flex items-center justify-center gap-1 transition-all cursor-pointer ${
+                        selectedBlock.isStrikethrough
+                          ? 'bg-indigo-50 border-indigo-500 text-indigo-700'
+                          : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                      }`}
+                      title="Tachado"
+                    >
+                      <Strikethrough className="w-3.5 h-3.5" />
+                      <span>S</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Font Family Selection */}
+              {selectedBlock.type !== 'divider' && selectedBlock.type !== 'image' && (
+                <div className="space-y-1.5 pt-2 border-t border-slate-100">
+                  <label className="font-bold text-slate-700 block">Fonte Segura para E-mail:</label>
+                  <select
+                    value={selectedBlock.fontFamily || 'Helvetica, Arial, sans-serif'}
+                    onChange={(e) => updateSelectedBlock({ fontFamily: e.target.value })}
+                    className="w-full p-2 rounded-lg border border-slate-300 text-xs bg-white focus:ring-2 focus:ring-indigo-500/20"
                   >
-                    <span className="material-symbols-outlined text-[16px]">delete</span>
-                    <span>Remover</span>
-                  </button>
+                    {FONT_FAMILIES.map((f) => (
+                      <option key={f.value} value={f.value}>
+                        {f.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* =========================================================================
+            SECTION 3: LAYOUT & ESPAÇAMENTO (Layout & Spacing)
+        ========================================================================= */}
+        <div className="border-b border-slate-100">
+          <button
+            type="button"
+            onClick={() => toggleSection('layout')}
+            className="w-full px-4 py-3 flex items-center justify-between text-xs font-bold text-slate-800 hover:bg-slate-50/80 transition-colors cursor-pointer"
+          >
+            <div className="flex items-center gap-2">
+              <Layout className="w-3.5 h-3.5 text-indigo-600" />
+              <span>3. Layout & Espaçamento</span>
+            </div>
+            {openSections.layout ? (
+              <ChevronDown className="w-4 h-4 text-slate-400" />
+            ) : (
+              <ChevronRight className="w-4 h-4 text-slate-400" />
+            )}
+          </button>
+
+          {openSections.layout && (
+            <div className="px-4 pb-4 pt-1 space-y-4 text-xs animate-fadeIn">
+              {/* Button Width Mode */}
+              {selectedBlock.type === 'button' && (
+                <div className="space-y-1.5">
+                  <label className="font-bold text-slate-700 block">Largura do Botão:</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => updateSelectedBlock({ buttonWidth: 'auto' })}
+                      className={`p-2 rounded-lg border text-xs font-semibold transition-all cursor-pointer ${
+                        (selectedBlock.buttonWidth || 'auto') === 'auto'
+                          ? 'bg-indigo-50 border-indigo-500 text-indigo-700'
+                          : 'bg-white border-slate-200 text-slate-600'
+                      }`}
+                    >
+                      Automático (Ajustado)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => updateSelectedBlock({ buttonWidth: 'full' })}
+                      className={`p-2 rounded-lg border text-xs font-semibold transition-all cursor-pointer ${
+                        selectedBlock.buttonWidth === 'full'
+                          ? 'bg-indigo-50 border-indigo-500 text-indigo-700'
+                          : 'bg-white border-slate-200 text-slate-600'
+                      }`}
+                    >
+                      100% (Largura Total)
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Line Height (for Text and Title) */}
+              {(selectedBlock.type === 'text' || selectedBlock.type === 'title' || selectedBlock.type === 'subtitle') && (
+                <div className="space-y-1.5">
+                  <label className="font-bold text-slate-700 block">Espaçamento Entre Linhas (Line-height):</label>
+                  <div className="grid grid-cols-4 gap-1.5">
+                    {['1.2', '1.4', '1.6', '1.8'].map((lh) => (
+                      <button
+                        key={lh}
+                        type="button"
+                        onClick={() => updateSelectedBlock({ lineHeight: lh })}
+                        className={`py-1.5 rounded-lg border text-xs font-mono transition-all cursor-pointer ${
+                          (selectedBlock.lineHeight || '1.5') === lh
+                            ? 'bg-indigo-50 border-indigo-500 text-indigo-700 font-bold'
+                            : 'bg-white border-slate-200 text-slate-600'
+                        }`}
+                      >
+                        {lh}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Text Transform (Uppercase, Lowercase, Capitalize) */}
+              {selectedBlock.type !== 'divider' && selectedBlock.type !== 'image' && (
+                <div className="space-y-1.5 pt-2 border-t border-slate-100">
+                  <label className="font-bold text-slate-700 block">Transformação de Texto:</label>
+                  <div className="grid grid-cols-3 gap-1.5">
+                    {[
+                      { id: 'none', label: 'Normal' },
+                      { id: 'uppercase', label: 'MAIÚSCULO' },
+                      { id: 'capitalize', label: 'Primeiras' },
+                    ].map((opt) => (
+                      <button
+                        key={opt.id}
+                        type="button"
+                        onClick={() => updateSelectedBlock({ textTransform: opt.id as any })}
+                        className={`py-1.5 rounded-lg border text-xs transition-all cursor-pointer ${
+                          (selectedBlock.textTransform || 'none') === opt.id
+                            ? 'bg-indigo-50 border-indigo-500 text-indigo-700 font-bold'
+                            : 'bg-white border-slate-200 text-slate-600'
+                        }`}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* =========================================================================
+            SECTION 4: VARIÁVEIS & AVANÇADO (Variables & Links)
+        ========================================================================= */}
+        <div className="border-b border-slate-100">
+          <button
+            type="button"
+            onClick={() => toggleSection('advanced')}
+            className="w-full px-4 py-3 flex items-center justify-between text-xs font-bold text-slate-800 hover:bg-slate-50/80 transition-colors cursor-pointer"
+          >
+            <div className="flex items-center gap-2">
+              <Code2 className="w-3.5 h-3.5 text-indigo-600" />
+              <span>4. Variáveis Dinâmicas & Hiperlinks</span>
+            </div>
+            {openSections.advanced ? (
+              <ChevronDown className="w-4 h-4 text-slate-400" />
+            ) : (
+              <ChevronRight className="w-4 h-4 text-slate-400" />
+            )}
+          </button>
+
+          {openSections.advanced && (
+            <div className="px-4 pb-4 pt-1 space-y-4 text-xs animate-fadeIn">
+              {/* Insert Dynamic Variables */}
+              <div className="space-y-2">
+                <label className="font-bold text-slate-700 block">
+                  Inserir Tags de Personalização:
+                </label>
+                <p className="text-[11px] text-slate-500">
+                  Clique na tag para adicionar ao texto do bloco selecionado:
+                </p>
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  {['{{nome}}', '{{empresa}}', '{{email}}', '{{cidade}}', '{{cupom}}'].map((tag) => (
+                    <button
+                      key={tag}
+                      type="button"
+                      onClick={() => insertVariableToSelectedBlock(tag)}
+                      className="px-2.5 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-md font-mono text-[11px] transition-colors cursor-pointer active:scale-95"
+                    >
+                      + {tag}
+                    </button>
+                  ))}
                 </div>
               </div>
-            )}
 
-            {/* URL input */}
-            <div>
-              <label className="block text-[11px] font-bold text-slate-600 mb-1">
-                Ou cole a URL direta da imagem (HTTPS):
-              </label>
-              <input
-                type="text"
-                value={selectedBlock.imageUrl || ''}
-                onChange={(e) => updateSelectedBlock({ imageUrl: e.target.value })}
-                placeholder="https://..."
-                className="w-full text-xs p-2.5 border border-slate-300 rounded-lg bg-white font-mono"
-              />
-            </div>
-          </div>
+              {/* Insert / Edit Hyperlink Button & Modal */}
+              <div className="pt-2 border-t border-slate-100 space-y-2">
+                <label className="font-bold text-slate-700 block">Hiperlinks no Texto:</label>
+                <button
+                  type="button"
+                  onClick={handleOpenLinkModal}
+                  className="w-full py-2 px-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-lg flex items-center justify-center gap-2 transition-colors cursor-pointer"
+                >
+                  <Link className="w-3.5 h-3.5 text-indigo-600" />
+                  <span>Inserir / Editar Link no Texto</span>
+                </button>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">Link ao Clicar na Imagem (URL)</label>
-              <input
-                type="text"
-                value={selectedBlock.imageLink || ''}
-                onChange={(e) => updateSelectedBlock({ imageLink: e.target.value })}
-                placeholder="https://..."
-                className="w-full text-xs p-2.5 border border-slate-300 rounded-lg bg-white"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">Texto Alternativo (Alt Text)</label>
-              <input
-                type="text"
-                value={selectedBlock.imageAlt || ''}
-                onChange={(e) => updateSelectedBlock({ imageAlt: e.target.value })}
-                placeholder="Ex: Imagem descritiva"
-                className="w-full text-xs p-2.5 border border-slate-300 rounded-lg bg-white"
-              />
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* COUPON FORM */}
-      {selectedBlock.type === 'coupon' && (
-        <div className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">Título do Cupom</label>
-              <input
-                type="text"
-                value={selectedBlock.couponTitle || ''}
-                onChange={(e) => updateSelectedBlock({ couponTitle: e.target.value })}
-                className="w-full text-xs p-2 border border-slate-300 rounded-lg bg-white"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">Código do Cupom</label>
-              <input
-                type="text"
-                value={selectedBlock.couponCode || ''}
-                onChange={(e) => updateSelectedBlock({ couponCode: e.target.value })}
-                className="w-full text-xs p-2 border border-slate-300 rounded-lg bg-white font-mono font-bold"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">Texto de Validade</label>
-              <input
-                type="text"
-                value={selectedBlock.couponExpiry || ''}
-                onChange={(e) => updateSelectedBlock({ couponExpiry: e.target.value })}
-                className="w-full text-xs p-2 border border-slate-300 rounded-lg bg-white"
-              />
-            </div>
-          </div>
-          {renderToolbar()}
-        </div>
-      )}
-
-      {/* DIVIDER FORM */}
-      {selectedBlock.type === 'divider' && (
-        <div className="space-y-4">
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">Estilo da Linha</label>
-              <select
-                value={selectedBlock.dividerStyle || 'solid'}
-                onChange={(e) => updateSelectedBlock({ dividerStyle: e.target.value as any })}
-                className="w-full text-xs p-2 border border-slate-300 rounded-lg bg-white cursor-pointer"
-              >
-                <option value="solid">Sólida (Linha Contínua)</option>
-                <option value="dashed">Tracejada (Dashed)</option>
-                <option value="dotted">Pontilhada (Dotted)</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">Espessura (px)</label>
-              <input
-                type="number"
-                min="1"
-                max="10"
-                value={selectedBlock.dividerHeight || 1}
-                onChange={(e) => updateSelectedBlock({ dividerHeight: Number(e.target.value) })}
-                className="w-full text-xs p-2 border border-slate-300 rounded-lg bg-white"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">Cor da Linha</label>
-              <div className="flex items-center gap-2">
-                <input
-                  type="color"
-                  value={selectedBlock.dividerColor || '#cbd5e1'}
-                  onChange={(e) => updateSelectedBlock({ dividerColor: e.target.value })}
-                  className="w-10 h-8 p-0.5 border border-slate-300 rounded-lg cursor-pointer bg-white"
+                <LinkEditorModal
+                  isOpen={linkModalOpen}
+                  onClose={() => setLinkModalOpen(false)}
+                  linkText={linkText}
+                  setLinkText={setLinkText}
+                  linkUrl={linkUrl}
+                  setLinkUrl={setLinkUrl}
+                  onSaveLink={onSaveLink}
+                  onRemoveLink={onRemoveLink}
                 />
-                <span className="text-xs font-mono">{selectedBlock.dividerColor || '#cbd5e1'}</span>
               </div>
             </div>
-          </div>
+          )}
         </div>
-      )}
-
-      {/* SOCIAL FORM */}
-      {selectedBlock.type === 'social' && (
-        <div className="space-y-4">
-          <div>
-            <label className="block text-xs font-bold text-slate-700 mb-1">Instagram URL</label>
-            <input
-              type="text"
-              value={selectedBlock.instagramUrl || ''}
-              onChange={(e) => updateSelectedBlock({ instagramUrl: e.target.value })}
-              className="w-full text-xs p-2 border border-slate-300 rounded-lg bg-white"
-              placeholder="https://instagram.com/..."
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-bold text-slate-700 mb-1">WhatsApp URL / Link</label>
-            <input
-              type="text"
-              value={selectedBlock.whatsappUrl || ''}
-              onChange={(e) => updateSelectedBlock({ whatsappUrl: e.target.value })}
-              className="w-full text-xs p-2 border border-slate-300 rounded-lg bg-white"
-              placeholder="https://wa.me/55..."
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-bold text-slate-700 mb-1">LinkedIn URL</label>
-            <input
-              type="text"
-              value={selectedBlock.linkedinUrl || ''}
-              onChange={(e) => updateSelectedBlock({ linkedinUrl: e.target.value })}
-              className="w-full text-xs p-2 border border-slate-300 rounded-lg bg-white"
-              placeholder="https://linkedin.com/..."
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-bold text-slate-700 mb-1">Facebook URL</label>
-            <input
-              type="text"
-              value={selectedBlock.facebookUrl || ''}
-              onChange={(e) => updateSelectedBlock({ facebookUrl: e.target.value })}
-              className="w-full text-xs p-2 border border-slate-300 rounded-lg bg-white"
-              placeholder="https://facebook.com/..."
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-bold text-slate-700 mb-1">Website URL</label>
-            <input
-              type="text"
-              value={selectedBlock.websiteUrl || ''}
-              onChange={(e) => updateSelectedBlock({ websiteUrl: e.target.value })}
-              className="w-full text-xs p-2 border border-slate-300 rounded-lg bg-white"
-              placeholder="https://..."
-            />
-          </div>
-        </div>
-      )}
-
-      {/* FOOTER FORM */}
-      {selectedBlock.type === 'footer' && (
-        <div className="space-y-4">
-          <div>
-            <label className="block text-xs font-bold text-slate-700 mb-1">Texto do Rodapé</label>
-            <RichTextEditor
-              key={`${selectedBlock.id}-footerText`}
-              ref={activeEditorRef}
-              value={selectedBlock.footerText || ''}
-              onChange={(newVal) => updateSelectedBlock({ footerText: newVal })}
-              placeholder="Digite o texto do rodapé..."
-              minHeight="80px"
-              style={{
-                color: selectedBlock.footerTextColor || selectedBlock.textColor || '#64748b',
-                fontSize: selectedBlock.fontSizePx ? `${selectedBlock.fontSizePx}px` : undefined,
-              }}
-            />
-          </div>
-          {renderToolbar({
-            defaultColorKey: 'footerTextColor',
-            defaultBgKey: 'footerBgColor',
-          })}
-        </div>
-      )}
+      </div>
     </div>
   );
 };

@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useImperativeHandle, forwardRef } from 'react';
+import { sanitizeRichText } from '../utils/security';
 
 export interface RichTextEditorRef {
   focus: () => void;
@@ -47,8 +48,9 @@ export const RichTextEditor = forwardRef<RichTextEditorRef, RichTextEditorProps>
           if (displayHtml.includes('\n') && !/<[a-z][\s\S]*>/i.test(displayHtml)) {
             displayHtml = displayHtml.replace(/\n/g, '<br/>');
           }
+          displayHtml = sanitizeRichText(displayHtml);
           editorRef.current.innerHTML = displayHtml;
-          lastHtmlRef.current = value || '';
+          lastHtmlRef.current = displayHtml;
         }
       }
     }, [value]);
@@ -84,7 +86,7 @@ export const RichTextEditor = forwardRef<RichTextEditorRef, RichTextEditorProps>
       if (editorRef.current) {
         const html = editorRef.current.innerHTML;
         lastHtmlRef.current = html;
-        onChange(html);
+        onChange(sanitizeRichText(html));
       }
     };
 
@@ -121,7 +123,7 @@ export const RichTextEditor = forwardRef<RichTextEditorRef, RichTextEditorProps>
             const range = sel.getRangeAt(0);
             range.deleteContents();
             const el = document.createElement('div');
-            el.innerHTML = html;
+            el.innerHTML = sanitizeRichText(html);
             const frag = document.createDocumentFragment();
             let node;
             let lastNode;
@@ -136,7 +138,7 @@ export const RichTextEditor = forwardRef<RichTextEditorRef, RichTextEditorProps>
               sel.addRange(range);
             }
           } else {
-            editorRef.current.innerHTML += html;
+            editorRef.current.innerHTML += sanitizeRichText(html);
           }
           handleInput();
         }

@@ -1,4 +1,5 @@
 import { EmailBlock, EmailData } from '../types';
+import { sanitizeEmailHtml } from './security';
 
 /**
  * Converts inline CSS string and HTML attributes into a normalized key-value map.
@@ -783,8 +784,10 @@ function parseCouponData(node: Element, styles: Record<string, string>) {
  * Parses an HTML string into structured EmailData fields for Gerador Visual
  */
 export function parseHtmlToEmailData(html?: string | null, _currentData?: EmailData): Partial<EmailData> {
+  const safeHtml = html && typeof html === 'string' ? sanitizeEmailHtml(html) : '';
   const result: Partial<EmailData> = {
-    customCodeHtml: html || '',
+    contentSource: 'html',
+    customCodeHtml: safeHtml,
   };
 
   if (!html || typeof html !== 'string' || html.trim() === '') {
@@ -793,7 +796,7 @@ export function parseHtmlToEmailData(html?: string | null, _currentData?: EmailD
 
   try {
     const parser = new DOMParser();
-    const doc = parser.parseFromString(html, 'text/html');
+    const doc = parser.parseFromString(safeHtml, 'text/html');
 
     // 1. Find Header Title
     const h1 = doc.querySelector('h1, h2, header, .header, .banner');
@@ -884,6 +887,9 @@ export function parseHtmlToBlocks(html?: string | null): EmailBlock[] {
     return [];
   }
 
+  const safeHtml = sanitizeEmailHtml(html);
+  if (!safeHtml) return [];
+
   const blocks: EmailBlock[] = [];
   let blockCounter = 1;
 
@@ -900,7 +906,7 @@ export function parseHtmlToBlocks(html?: string | null): EmailBlock[] {
 
   try {
     const parser = new DOMParser();
-    const doc = parser.parseFromString(html, 'text/html');
+    const doc = parser.parseFromString(safeHtml, 'text/html');
 
     if (!doc || !doc.body) {
       return [];

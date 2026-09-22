@@ -100,7 +100,12 @@ export interface EmailTemplate {
   customCodeHtml?: string;
 }
 
+export type ContentSource = 'blocks' | 'html';
+
 export interface EmailData {
+  documentId?: string;
+  subject?: string;
+  contentSource?: ContentSource;
   headerTitle: string;
   greeting: string;
   buttonText: string;
@@ -118,3 +123,5 @@ export interface EmailData {
   fontSizeLevel?: 'normal' | 'large_mobile';
 }
 
+
+export type EditableBlockProperty = Exclude<keyof EmailBlock, 'id' | 'type'>;

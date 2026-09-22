@@ -41,18 +41,36 @@ export async function ensureFirebaseAuth(): Promise<User | null> {
   }
 }
 
+export function getFirebaseConnectionErrorMessage(error: unknown): string {
+  const err = error as { code?: string; message?: string };
+  const code = String(err?.code || '').toLowerCase();
+  const message = String(err?.message || '').toLowerCase();
+
+  if (code.includes('permission-denied') || message.includes('permission-denied')) {
+    return 'O Firebase respondeu, mas a operação não foi autorizada.';
+  }
+  if (code.includes('unauthenticated') || message.includes('unauthenticated')) {
+    return 'A autenticação do Firebase não foi concluída.';
+  }
+  if (code.includes('unavailable') || message.includes('offline') || message.includes('network')) {
+    return 'O Firebase está indisponível ou sem conexão de rede.';
+  }
+  return 'Não foi possível confirmar a conexão com o Firebase.';
+}
+
 /**
  * Tests connection to Firebase Firestore & Auth
  */
 export async function testFirebaseConnection(): Promise<{ ok: boolean; message: string }> {
   try {
-    await ensureFirebaseAuth();
+    const user = await ensureFirebaseAuth();
+    if (!user) {
+      return { ok: false, message: 'Não foi possível autenticar no Firebase.' };
+    }
+
     await getDocFromServer(doc(db, 'test', 'connection'));
     return { ok: true, message: 'Conexão com o Firebase estabelecida com sucesso!' };
-  } catch (error: any) {
-    if (error?.message?.includes('offline')) {
-      return { ok: false, message: 'O cliente Firebase está offline.' };
-    }
-    return { ok: true, message: 'Firebase configurado e operacional.' };
+  } catch (error: unknown) {
+    return { ok: false, message: getFirebaseConnectionErrorMessage(error) };
   }
 }

@@ -1,17 +1,35 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
-import { EmailData, EmailBlock, BlockType, Screen, TransitionType } from '../types';
+import { EmailData, EmailBlock, BlockType, Screen, TransitionType, EmailTemplate } from '../types';
 import { parseHtmlToBlocks } from '../utils/htmlParser';
 import { normalizeImage } from '../utils/imageNormalizer';
-import { uploadToPublicHost, checkImageSize } from '../utils/imageUploader';
+import { uploadImage, checkImageSize } from '../utils/imageUploader';
 import { compileBlocksToHtml, generateSingleBlockHtml } from '../utils/compiler';
-import { DEFAULT_TEMPLATES } from '../data/templates';
+import { compileTransportHtml } from '../utils/emailCompiler';
+import { sanitizeEmailHtml } from '../utils/security';
 import { RichTextEditorRef } from '../components/RichTextEditor';
 import {
+  EditorTopBar,
+  ExportModal,
+  ImportModal,
+  TemplateManagerModal,
   BlocksSidebar,
   PropertiesPanel,
   PreviewCanvas,
-  TemplateSelector,
 } from '../components/gerador';
+import { DEFAULT_BLOCKS } from '../data/defaultBlocks';
+import { useEditorHistory } from '../hooks/useEditorHistory';
+import { useDraftAutosave } from '../hooks/useDraftAutosave';
+import { Toast } from '../components/ui/Toast';
+import { sanitizeBlockPropertyUpdate } from '../data/blockProperties';
+import {
+  listSavedTemplates,
+  loadDraft,
+  saveDraft,
+  saveTemplateDocument,
+  restoreTemplateVersion,
+  deleteSavedTemplate,
+} from '../utils/templateStore';
+import type { TemplateDocument } from '../utils/templateStore';
 
 interface GeradorProScreenProps {
   emailData: EmailData;
@@ -19,104 +37,86 @@ interface GeradorProScreenProps {
   onNavigate: (screen: Screen, transition?: TransitionType) => void;
 }
 
-const DEFAULT_BLOCKS: EmailBlock[] = [
-  {
-    id: 'block-1',
-    type: 'header_text',
-    headerTitle: 'ESTÁCIO\nSUA MATRÍCULA\nCOMEÇA AQUI!',
-    headerSubtitle: 'Condições especiais para estudar na Estácio R9 – Taquara',
-    headerBgColor: '#003bb3',
-    headerTextColor: '#ffffff',
-    headerSubtitleColor: '#ffffff',
-    alignment: 'center',
-    fontSizePx: 28,
-    headerSubtitleSizePx: 16,
-    isBold: true,
-  },
-  {
-    id: 'block-2',
-    type: 'title',
-    text: 'Novidades Exclusivas para {{empresa}}',
-    fontSizePx: 28,
-    textColor: '#1e1b4b',
-    alignment: 'left',
-    isBold: true,
-    fontFamily: 'Helvetica, Arial, sans-serif',
-  },
-  {
-    id: 'block-3',
-    type: 'subtitle',
-    text: 'Olá {{nome}}, temos uma atualização especial para você!',
-    fontSizePx: 18,
-    textColor: '#475569',
-    alignment: 'left',
-    isItalic: false,
-    fontFamily: 'Helvetica, Arial, sans-serif',
-  },
-  {
-    id: 'block-4',
-    type: 'text',
-    text: 'Estamos muito felizes em apresentar as novas funcionalidades desenvolvidas sob medida para impulsionar os resultados de sua equipe.\n\nCom a nossa nova plataforma, você terá controle total sobre suas entregas, relatórios automatizados e integração simplificada em tempo real.',
-    fontSizePx: 15,
-    textColor: '#334155',
-    alignment: 'left',
-    lineHeight: '1.6',
-    fontFamily: 'Helvetica, Arial, sans-serif',
-  },
-  {
-    id: 'block-5',
-    type: 'button',
-    buttonLabel: 'Conhecer Plataforma Agora',
-    buttonUrl: 'https://exemplo.com/plataforma',
-    buttonBgColor: '#4f46e5',
-    buttonTextColor: '#ffffff',
-    buttonWidth: 'auto',
-    alignment: 'center',
-    fontSizePx: 16,
-    isBold: true,
-  },
-  {
-    id: 'block-6',
-    type: 'divider',
-    dividerStyle: 'solid',
-    dividerColor: '#e2e8f0',
-  },
-  {
-    id: 'block-7',
-    type: 'coupon',
-    couponCode: 'ESTACIO30OFF',
-    couponDiscount: '30% DE DESCONTO NO PLANO ANUAL',
-    couponBgColor: '#e0e7ff',
-    couponBorderColor: '#6366f1',
-    fontSizePx: 22,
-    isBold: true,
-  },
-  {
-    id: 'block-8',
-    type: 'footer',
-    footerText: 'Você está recebendo este e-mail enviado para {{email}}.\n© 2026 Estácio. Todos os direitos reservados.',
-    footerBgColor: '#f8fafc',
-    footerTextColor: '#64748b',
-    fontSizePx: 12,
-    alignment: 'center',
-  },
-];
 
 export const GeradorProScreen: React.FC<GeradorProScreenProps> = ({
   emailData,
   setEmailData,
   onNavigate,
 }) => {
+  // Initialize the document identity first so drafts can never leak between templates.
+  const [documentId, setDocumentId] = useState<string>(() => emailData.documentId || `template-${Date.now()}`);
+  const [draft] = useState(() => loadDraft(documentId));
   const [blocks, setBlocks] = useState<EmailBlock[]>(() => {
-    if (emailData.customCodeHtml) {
-      const parsed = parseHtmlToBlocks(emailData.customCodeHtml);
-      if (parsed && parsed.length > 0) {
-        return parsed;
-      }
+    if (draft?.blocks?.length) return draft.blocks;
+    if (emailData.contentSource === 'html' && emailData.customCodeHtml) {
+      const parsed = parseHtmlToBlocks(sanitizeEmailHtml(emailData.customCodeHtml));
+      if (parsed && parsed.length > 0) return parsed;
     }
     return DEFAULT_BLOCKS;
   });
-  const [selectedBlockId, setSelectedBlockId] = useState<string>(() => blocks[0]?.id || 'block-1');
+  const [savedTemplates, setSavedTemplates] = useState<TemplateDocument[]>(() => listSavedTemplates());
+  const [isTemplateManagerOpen, setIsTemplateManagerOpen] = useState(false);
+
+  const [selectedBlockId, setSelectedBlockId] = useState<string | null>(() => blocks[0]?.id || null);
+  useEffect(() => {
+    if (draft?.emailData) {
+      setEmailData((prev) => ({ ...prev, ...draft.emailData, documentId: draft.documentId || prev.documentId }));
+    }
+  }, []);
+
+
+  useEffect(() => {
+    setEmailData((prev) => ({ ...prev, documentId, contentSource: 'blocks' }));
+  }, []);
+
+  const { push: pushToHistory, undo, redo, reset: resetHistory, canUndo, canRedo } = useEditorHistory(blocks);
+
+  const handleUndo = useCallback(() => {
+    const previous = undo();
+    if (previous) setBlocks(previous);
+  }, [undo]);
+
+  const handleRedo = useCallback(() => {
+    const next = redo();
+    if (next) setBlocks(next);
+  }, [redo]);
+
+  // Keyboard shortcuts for Undo/Redo
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      const isTextEditing = !!target && (
+        target.tagName === 'INPUT' ||
+        target.tagName === 'TEXTAREA' ||
+        target.tagName === 'SELECT' ||
+        target.isContentEditable
+      );
+      if (isTextEditing) return;
+
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+        if (e.shiftKey) {
+          handleRedo();
+        } else {
+          handleUndo();
+        }
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') {
+        handleRedo();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [handleUndo, handleRedo]);
+
+  const { saveStatus, setSaveStatus, lastSavedTime, setLastSavedTime } = useDraftAutosave(blocks, emailData, documentId);
+
+  // Modals state
+  const [isExportModalOpen, setIsExportModalOpen] = useState<boolean>(false);
+  const [isImportModalOpen, setIsImportModalOpen] = useState<boolean>(false);
+  const [linkModalOpen, setLinkModalOpen] = useState<boolean>(false);
+  const [linkText, setLinkText] = useState<string>('');
+  const [linkUrl, setLinkUrl] = useState<string>('');
+
+  // Selection state
   const [activeSelection, setActiveSelection] = useState<{
     fieldName: string;
     start: number;
@@ -124,81 +124,60 @@ export const GeradorProScreen: React.FC<GeradorProScreenProps> = ({
     selectedText: string;
   } | null>(null);
 
-  // Clear active selection when selected block changes
   useEffect(() => {
     setActiveSelection(null);
   }, [selectedBlockId]);
 
-  const [linkModalOpen, setLinkModalOpen] = useState<boolean>(false);
-  const [linkText, setLinkText] = useState<string>('');
-  const [linkUrl, setLinkUrl] = useState<string>('');
+  // Viewport Device and UI State
   const [previewDevice, setPreviewDevice] = useState<'desktop' | 'mobile'>('desktop');
-  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [toastMessage, setToastMessage] = useState<{ message: string; kind: 'success' | 'error' | 'info' } | null>(null);
   const [isNormalizing, setIsNormalizing] = useState<boolean>(false);
-  const [draggedIdx, setDraggedIdx] = useState<number | null>(null);
-  const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
-  const [isAddBlockMenuOpen, setIsAddBlockMenuOpen] = useState<boolean>(false);
-  const [openCardMenuId, setOpenCardMenuId] = useState<string | null>(null);
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  // References
   const imageFileInputRef = useRef<HTMLInputElement | null>(null);
   const activeEditorRef = useRef<RichTextEditorRef | null>(null);
-
-  const [iframeHeight, setIframeHeight] = useState<number>(600);
   const previewIframeRef = useRef<HTMLIFrameElement | null>(null);
-  const isIframeInitializedRef = useRef<boolean>(false);
+  const [iframeHeight, setIframeHeight] = useState<number>(600);
   const prevBlocksRef = useRef<EmailBlock[]>(blocks);
-  // Track the HTML version produced by this component to avoid re-parsing on self-updates
   const localCompiledHtmlRef = useRef<string>(compileBlocksToHtml(blocks));
 
-  // Memoize compiled HTML based on blocks
+  // Memoize compiled HTML
   const compiledHtml = useMemo(() => compileBlocksToHtml(blocks), [blocks]);
+  const transportHtml = useMemo(() => compileTransportHtml({ ...emailData, documentId }, blocks), [emailData, blocks, documentId]);
 
-  // Auto resize iframe to fit full content without internal scrollbars
+  // Handle iframe dynamic height
   const handleIframeLoad = useCallback(() => {
     try {
       if (previewIframeRef.current && previewIframeRef.current.contentWindow) {
         const doc = previewIframeRef.current.contentDocument || previewIframeRef.current.contentWindow.document;
         if (doc) {
-          const scrollH = doc.documentElement?.scrollHeight || doc.body?.scrollHeight;
-          if (scrollH && scrollH > 200) {
-            setIframeHeight((prev) => (Math.abs(prev - (scrollH + 10)) > 8 ? scrollH + 10 : prev));
+          const bodyH = doc.body?.scrollHeight || 0;
+          const htmlH = doc.documentElement?.scrollHeight || 0;
+          const contentH = Math.max(bodyH, htmlH);
+          if (contentH > 100) {
+            setIframeHeight(contentH + 20);
           }
-          isIframeInitializedRef.current = true;
         }
       }
     } catch {
-      // Cross-origin fallback
+      // Fallback
     }
   }, []);
 
-  // Recalculate iframe height smoothly without resetting scroll position
+  // Sync iframe block DOM elements in-place when block properties change
   useEffect(() => {
-    const timer = setTimeout(() => {
-      handleIframeLoad();
-    }, 150);
-    return () => clearTimeout(timer);
-  }, [compiledHtml, previewDevice, handleIframeLoad]);
-
-  // Partial DOM update in preview iframe: when only block styling/content changes (same block structure/ids),
-  // update the corresponding DOM elements in place so the iframe document is NEVER rebuilt, preventing any jump or scroll reset.
-  useEffect(() => {
-    const prevBlocks = prevBlocksRef.current;
+    const prev = prevBlocksRef.current;
     prevBlocksRef.current = blocks;
 
-    if (!isIframeInitializedRef.current || !previewIframeRef.current) {
-      return;
-    }
-
+    if (!previewIframeRef.current || !previewIframeRef.current.contentWindow) return;
     try {
-      const doc = previewIframeRef.current.contentDocument || previewIframeRef.current.contentWindow?.document;
+      const doc = previewIframeRef.current.contentDocument || previewIframeRef.current.contentWindow.document;
       if (!doc || !doc.body) return;
 
       const sameBlockIds =
-        prevBlocks.length === blocks.length &&
-        blocks.every((b, idx) => prevBlocks[idx] && prevBlocks[idx].id === b.id && prevBlocks[idx].type === b.type);
+        prev.length === blocks.length && prev.every((b, i) => b.id === blocks[i]?.id);
 
       if (sameBlockIds) {
-        // Update each block element in-place without triggering iframe re-parse or scroll jump
         blocks.forEach((block) => {
           const blockEl = doc.querySelector(`[data-block-id="${block.id}"]`) as HTMLElement | null;
           if (blockEl) {
@@ -211,18 +190,17 @@ export const GeradorProScreen: React.FC<GeradorProScreenProps> = ({
           }
         });
 
-        // Update iframe height if content dimensions shifted
         const scrollH = doc.documentElement?.scrollHeight || doc.body?.scrollHeight;
-        if (scrollH && scrollH > 200) {
-          setIframeHeight((prev) => (Math.abs(prev - (scrollH + 10)) > 8 ? scrollH + 10 : prev));
+        if (scrollH && scrollH > 100) {
+          setIframeHeight((prevH) => (Math.abs(prevH - (scrollH + 10)) > 8 ? scrollH + 10 : prevH));
         }
       }
     } catch {
-      // Fallback silently if document access fails
+      // Fallback
     }
   }, [blocks]);
 
-  // Continuously sync compiled HTML from Gerador Visual blocks to global emailData.customCodeHtml
+  // Continuously sync compiled HTML to emailData for external screens (e.g. VisualizacaoScreen)
   useEffect(() => {
     localCompiledHtmlRef.current = compiledHtml;
     setEmailData((prev) => {
@@ -230,223 +208,101 @@ export const GeradorProScreen: React.FC<GeradorProScreenProps> = ({
       return {
         ...prev,
         customCodeHtml: compiledHtml,
+        contentSource: 'blocks',
+        documentId,
+        subject: prev.subject || prev.headerTitle,
       };
     });
   }, [compiledHtml, setEmailData]);
 
-  // Sync blocks ONLY if emailData.customCodeHtml changes externally (e.g. from template load or external file import)
+  const showToast = useCallback((msg: string, kind: 'success' | 'error' | 'info' = 'success') => {
+    setToastMessage({ message: msg, kind });
+  }, []);
+
+  const persistTemplate = useCallback(() => {
+    setSaveStatus('saving');
+    try {
+      const saved = saveTemplateDocument({
+        id: documentId,
+        name: emailData.headerTitle || 'Meu template',
+        subject: emailData.subject || 'E-mail sem assunto',
+        blocks,
+        emailData: { ...emailData, documentId },
+      });
+      setDocumentId(saved.id);
+      setSavedTemplates(listSavedTemplates());
+      saveDraft(blocks, { ...emailData, documentId: saved.id }, saved.id);
+      setSaveStatus('saved');
+      setLastSavedTime(`às ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`);
+      showToast('Template salvo com nova versão.');
+    } catch {
+      setSaveStatus('error');
+      showToast('Não foi possível salvar o template.', 'error');
+    }
+  }, [blocks, documentId, emailData]);
+
   useEffect(() => {
-    const externalHtml = emailData.customCodeHtml;
-    if (!externalHtml || externalHtml === localCompiledHtmlRef.current) {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
+        event.preventDefault();
+        persistTemplate();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [persistTemplate]);
+
+  useEffect(() => {
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (saveStatus === 'dirty' || saveStatus === 'saving') {
+        event.preventDefault();
+        event.returnValue = '';
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [saveStatus]);
+
+  const handleLoadSavedTemplate = (template: TemplateDocument) => {
+    const safeHtml = sanitizeEmailHtml(template.emailData.customCodeHtml || '');
+    const parsed = template.blocks?.length ? template.blocks : parseHtmlToBlocks(safeHtml);
+    if (!parsed?.length) {
+      showToast('Não foi possível reconstruir este template.', 'error');
       return;
     }
-    localCompiledHtmlRef.current = externalHtml;
-    const parsed = parseHtmlToBlocks(externalHtml);
-    if (parsed && parsed.length > 0) {
-      setBlocks(parsed);
-      setSelectedBlockId((prev) => (parsed.some((b) => b.id === prev) ? prev : parsed[0].id));
-    }
-  }, [emailData.customCodeHtml]);
-
-  const showToast = (msg: string) => {
-    setToastMessage(msg);
-    setTimeout(() => setToastMessage(null), 3000);
+    setDocumentId(template.id);
+    setBlocks(parsed);
+    setSelectedBlockId(parsed[0]?.id || null);
+    setEmailData({ ...template.emailData, customCodeHtml: safeHtml, documentId: template.id, contentSource: 'blocks', subject: template.subject });
+    resetHistory(parsed);
+    setIsTemplateManagerOpen(false);
+    setSaveStatus('saved');
+    showToast(`Template \"${template.name}\" carregado.`);
   };
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    try {
-      const isHtml = file.name.endsWith('.html') || file.name.endsWith('.htm') || file.type === 'text/html';
-      if (!isHtml) {
-        showToast('⚠️ Por favor, selecione um arquivo de texto com extensão .html ou .htm');
-        e.target.value = '';
-        return;
-      }
-
-      if (file.size > 10 * 1024 * 1024) {
-        showToast('⚠️ O arquivo HTML excede o limite seguro de 10 MB.');
-        e.target.value = '';
-        return;
-      }
-
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        try {
-          const content = event.target?.result as string;
-          if (content && content.trim()) {
-            setEmailData((prev) => ({
-              ...prev,
-              customCodeHtml: content,
-            }));
-            
-            const parsedBlocks = parseHtmlToBlocks(content);
-            if (parsedBlocks && parsedBlocks.length > 0) {
-              setBlocks(parsedBlocks);
-              setSelectedBlockId(parsedBlocks[0].id);
-              showToast(`✓ Arquivo "${file.name}" importado com sucesso (${parsedBlocks.length} blocos identificados)!`);
-            } else {
-              showToast(`✓ Arquivo "${file.name}" importado no Gerador Visual!`);
-            }
-          } else {
-            showToast('⚠️ O arquivo selecionado está vazio.');
-          }
-        } catch (parseErr: any) {
-          console.error('Erro ao processar conteúdo do arquivo:', parseErr);
-          showToast('⚠️ Erro ao interpretar a estrutura do arquivo HTML.');
-        }
-      };
-      reader.onerror = (readErr) => {
-        console.error('Erro na leitura do arquivo:', readErr);
-        showToast('⚠️ Ocorreu um erro ao ler o arquivo. Tente novamente.');
-      };
-      reader.readAsText(file);
-    } catch (err: any) {
-      console.error('Erro geral no upload de arquivo:', err);
-      showToast('⚠️ Falha ao abrir o arquivo selecionado.');
-    } finally {
-      e.target.value = '';
-    }
+  const handleDeleteSavedTemplate = (id: string) => {
+    deleteSavedTemplate(id);
+    setSavedTemplates(listSavedTemplates());
+    showToast('Template removido.');
   };
 
-  const handleImageBlockUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    if (!file.type.startsWith('image/')) {
-      showToast('Por favor, selecione um arquivo de imagem válido (PNG, JPG, WEBP, GIF, SVG).');
-      return;
-    }
-
-    const sizeCheck = checkImageSize(file, 5);
-    if (!sizeCheck.valid) {
-      showToast(`⚠️ ${sizeCheck.message}`);
-      e.target.value = '';
-      return;
-    }
-
-    setIsNormalizing(true);
-    showToast('Otimizando e fazendo upload para Firebase Storage (/emails/)...');
-    try {
-      const normalizedDataUrl = await normalizeImage(file, 1200);
-      const uploadRes = await uploadToPublicHost(normalizedDataUrl, file.name);
-
-      if (uploadRes.isPublicUrl) {
-        updateSelectedBlock({ imageUrl: uploadRes.url });
-        if (uploadRes.isFirebase) {
-          showToast('🔥 Imagem enviada para Firebase Storage (/emails/)! URL inserida na tag <img src="...">.');
-        } else {
-          showToast('✨ Imagem hospedada em URL HTTPS pública! Visível em 100% dos e-mails (Gmail/Outlook).');
-        }
-      } else {
-        updateSelectedBlock({ imageUrl: uploadRes.url });
-        showToast('⚠️ Salvo localmente em Base64.');
-      }
-    } catch (err: any) {
-      console.error('Erro no processamento da imagem:', err);
-      showToast(err?.message || 'Não foi possível carregar a imagem selecionada.');
-    } finally {
-      setIsNormalizing(false);
-      e.target.value = '';
+  const handleRestoreVersion = (templateId: string, versionId: string) => {
+    const restored = restoreTemplateVersion(templateId, versionId);
+    if (restored) {
+      setSavedTemplates(listSavedTemplates());
+      handleLoadSavedTemplate(restored);
+      showToast('Versão restaurada.');
     }
   };
-
-  const handleUploadExistingToPublicHost = async () => {
-    const selected = blocks.find((b) => b.id === selectedBlockId);
-    if (!selected || !selected.imageUrl) {
-      showToast('Nenhuma imagem selecionada para hospedar.');
-      return;
-    }
-
-    if (selected.imageUrl.startsWith('http://') || selected.imageUrl.startsWith('https://')) {
-      showToast('Esta imagem já possui uma URL HTTPS pública!');
-      return;
-    }
-
-    setIsNormalizing(true);
-    showToast('Enviando para o Firebase Storage (/emails/)...');
-
-    try {
-      const res = await uploadToPublicHost(selected.imageUrl, 'email_banner');
-      if (res.isPublicUrl) {
-        updateSelectedBlock({ imageUrl: res.url });
-        showToast('🔥 Imagem enviada para o Firebase Storage (/emails/)! URL pública inserida.');
-      } else {
-        showToast(res.message);
-      }
-    } catch (err) {
-      showToast('Não foi possível realizar o upload da imagem.');
-    } finally {
-      setIsNormalizing(false);
-    }
-  };
-
-  const handleNormalizeExistingImage = async () => {
-    const selected = blocks.find((b) => b.id === selectedBlockId);
-    if (!selected || !selected.imageUrl) {
-      showToast('Insira ou envie uma imagem primeiro para normalizar.');
-      return;
-    }
-
-    setIsNormalizing(true);
-    showToast('Ajustando dimensões e enviando para o Firebase Storage (/emails/)...');
-
-    try {
-      const normalized = await normalizeImage(selected.imageUrl, 1200);
-      const res = await uploadToPublicHost(normalized, 'email_banner_normalized');
-      updateSelectedBlock({ imageUrl: res.url });
-      if (res.isFirebase) {
-        showToast('🔥 Imagem ajustada e enviada para o Firebase Storage (/emails/)!');
-      } else {
-        showToast('✨ Imagem ajustada e hospedada com URL pública!');
-      }
-    } catch (err) {
-      showToast('Não foi possível ajustar a imagem. Verifique se a URL é acessível.');
-    } finally {
-      setIsNormalizing(false);
-    }
-  };
-
-  const handleSelectModel = (templateId: string) => {
-    const tmpl = DEFAULT_TEMPLATES.find((t) => t.id === templateId);
-    if (!tmpl) return;
-
-    setEmailData((prev) => ({
-      ...prev,
-      activeTemplateId: tmpl.id,
-      headerTitle: tmpl.headerTitle || prev.headerTitle,
-      greeting: tmpl.greeting || prev.greeting,
-      buttonText: tmpl.buttonText || prev.buttonText,
-      buttonUrl: tmpl.buttonUrl || prev.buttonUrl,
-      bodyText: tmpl.bodyText || prev.bodyText,
-      footerText: tmpl.footerText || prev.footerText,
-      primaryColor: tmpl.primaryColor || prev.primaryColor,
-      customCodeHtml: tmpl.customCodeHtml,
-    }));
-
-    if (tmpl.customCodeHtml) {
-      const parsed = parseHtmlToBlocks(tmpl.customCodeHtml);
-      if (parsed && parsed.length > 0) {
-        setBlocks(parsed);
-        setSelectedBlockId(parsed[0].id);
-        showToast(`✓ Modelo "${tmpl.name}" carregado com ${parsed.length} blocos no Gerador Visual!`);
-        return;
-      }
-    }
-
-    showToast(`✓ Modelo "${tmpl.name}" carregado com sucesso!`);
-  };
-
-  const selectedBlock = blocks.find((b) => b.id === selectedBlockId) || blocks[0];
 
   // Block management handlers
-  const handleAddBlock = (type: BlockType) => {
+  const handleAddBlock = (type: BlockType, insertAfterIndex?: number) => {
     const newId = `block-${Date.now()}`;
     let newBlock: EmailBlock = { id: newId, type };
 
     switch (type) {
       case 'header_text':
+      case 'header':
         newBlock = {
           ...newBlock,
           headerTitle: 'ESTÁCIO\nSUA MATRÍCULA\nCOMEÇA AQUI!',
@@ -458,28 +314,6 @@ export const GeradorProScreen: React.FC<GeradorProScreenProps> = ({
           headerSubtitleSizePx: 16,
           alignment: 'center',
           isBold: true,
-        };
-        break;
-      case 'header':
-        newBlock = {
-          ...newBlock,
-          headerTitle: 'Novo Cabeçalho',
-          headerSubtitle: 'Subtítulo do cabeçalho',
-          headerBgColor: '#003bb3',
-          headerTextColor: '#ffffff',
-          headerSubtitleColor: '#ffffff',
-          alignment: 'center',
-          fontSizePx: 24,
-          headerSubtitleSizePx: 15,
-          isBold: true,
-        };
-        break;
-      case 'header_image':
-        newBlock = {
-          ...newBlock,
-          imageUrl: 'https://images.unsplash.com/photo-1579546929518-9e396f3cc809?auto=format&fit=crop&w=600&h=200&q=80',
-          imageAlt: 'Imagem de Cabeçalho do E-mail',
-          imageCaption: '',
         };
         break;
       case 'title':
@@ -495,7 +329,7 @@ export const GeradorProScreen: React.FC<GeradorProScreenProps> = ({
       case 'subtitle':
         newBlock = {
           ...newBlock,
-          text: 'Insira aqui seu subtítulo curto',
+          text: 'Insira aqui seu subtítulo curto de apoio',
           fontSizePx: 18,
           textColor: '#475569',
           alignment: 'left',
@@ -527,9 +361,9 @@ export const GeradorProScreen: React.FC<GeradorProScreenProps> = ({
       case 'image':
         newBlock = {
           ...newBlock,
-          imageUrl: 'https://images.unsplash.com/photo-1557804506-669a67965ba0?auto=format&fit=crop&w=600&q=80',
+          imageUrl: '',
           imageAlt: 'Imagem Ilustrativa',
-          imageCaption: 'Legenda opcional da imagem',
+          imageCaption: '',
         };
         break;
       case 'coupon':
@@ -539,6 +373,8 @@ export const GeradorProScreen: React.FC<GeradorProScreenProps> = ({
           couponDiscount: 'OFERTA ESPECIAL 25% OFF',
           couponBgColor: '#f0fdf4',
           couponBorderColor: '#16a34a',
+          fontSizePx: 22,
+          isBold: true,
         };
         break;
       case 'divider':
@@ -568,35 +404,17 @@ export const GeradorProScreen: React.FC<GeradorProScreenProps> = ({
         break;
     }
 
-    setBlocks((prev) => [...prev, newBlock]);
+    const nextBlocks = [...blocks];
+    if (typeof insertAfterIndex === 'number' && insertAfterIndex >= 0 && insertAfterIndex < nextBlocks.length) {
+      nextBlocks.splice(insertAfterIndex + 1, 0, newBlock);
+    } else {
+      nextBlocks.push(newBlock);
+    }
+
+    setBlocks(nextBlocks);
     setSelectedBlockId(newId);
-    showToast(`Bloco [${type.toUpperCase()}] adicionado com sucesso!`);
-  };
-
-  const handleReorder = (fromIndex: number, toIndex: number) => {
-    if (fromIndex === toIndex || fromIndex < 0 || toIndex < 0 || fromIndex >= blocks.length || toIndex >= blocks.length) return;
-    const newBlocks = [...blocks];
-    const [draggedItem] = newBlocks.splice(fromIndex, 1);
-    newBlocks.splice(toIndex, 0, draggedItem);
-    setBlocks(newBlocks);
-  };
-
-  const handleMoveUp = (index: number) => {
-    if (index === 0) return;
-    const newBlocks = [...blocks];
-    const temp = newBlocks[index - 1];
-    newBlocks[index - 1] = newBlocks[index];
-    newBlocks[index] = temp;
-    setBlocks(newBlocks);
-  };
-
-  const handleMoveDown = (index: number) => {
-    if (index === blocks.length - 1) return;
-    const newBlocks = [...blocks];
-    const temp = newBlocks[index + 1];
-    newBlocks[index + 1] = newBlocks[index];
-    newBlocks[index] = temp;
-    setBlocks(newBlocks);
+    pushToHistory(nextBlocks);
+    showToast(`Bloco adicionado ao e-mail!`);
   };
 
   const handleDuplicate = (block: EmailBlock) => {
@@ -607,6 +425,7 @@ export const GeradorProScreen: React.FC<GeradorProScreenProps> = ({
     newBlocks.splice(index + 1, 0, dupBlock);
     setBlocks(newBlocks);
     setSelectedBlockId(dupId);
+    pushToHistory(newBlocks);
     showToast('Bloco duplicado!');
   };
 
@@ -618,29 +437,197 @@ export const GeradorProScreen: React.FC<GeradorProScreenProps> = ({
     const newBlocks = blocks.filter((b) => b.id !== id);
     setBlocks(newBlocks);
     if (selectedBlockId === id) {
-      setSelectedBlockId(newBlocks[0].id);
+      setSelectedBlockId(newBlocks[0]?.id || null);
     }
+    pushToHistory(newBlocks);
     showToast('Bloco removido.');
   };
 
-  const updateSelectedBlock = (updatedProps: Partial<EmailBlock>) => {
-    const targetId = selectedBlock?.id || selectedBlockId;
-    setBlocks((prev) =>
-      prev.map((b) => {
-        if (b.id !== targetId) return b;
-        let isDifferent = false;
-        for (const key in updatedProps) {
-          if ((b as any)[key] !== (updatedProps as any)[key]) {
-            isDifferent = true;
-            break;
-          }
-        }
-        if (!isDifferent) return b;
-        return { ...b, ...updatedProps };
-      })
-    );
+  const handleReorder = (fromIndex: number, toIndex: number) => {
+    if (fromIndex === toIndex || fromIndex < 0 || toIndex < 0 || fromIndex >= blocks.length || toIndex >= blocks.length) return;
+    const newBlocks = [...blocks];
+    const [draggedItem] = newBlocks.splice(fromIndex, 1);
+    newBlocks.splice(toIndex, 0, draggedItem);
+    setBlocks(newBlocks);
+    pushToHistory(newBlocks);
   };
 
+  const handleMoveUp = (index: number) => {
+    if (index === 0) return;
+    const newBlocks = [...blocks];
+    const temp = newBlocks[index - 1];
+    newBlocks[index - 1] = newBlocks[index];
+    newBlocks[index] = temp;
+    setBlocks(newBlocks);
+    pushToHistory(newBlocks);
+  };
+
+  const handleMoveDown = (index: number) => {
+    if (index === blocks.length - 1) return;
+    const newBlocks = [...blocks];
+    const temp = newBlocks[index + 1];
+    newBlocks[index + 1] = newBlocks[index];
+    newBlocks[index] = temp;
+    setBlocks(newBlocks);
+    pushToHistory(newBlocks);
+  };
+
+  const updateSelectedBlock = (updatedProps: Partial<EmailBlock>) => {
+    const targetId = selectedBlockId;
+    if (!targetId) return;
+
+    const safeProps = sanitizeBlockPropertyUpdate(updatedProps);
+    if (Object.keys(safeProps).length === 0) return;
+
+    const nextBlocks = blocks.map((block) =>
+      block.id === targetId ? { ...block, ...safeProps } : block,
+    );
+    setBlocks(nextBlocks);
+    pushToHistory(nextBlocks);
+  };
+
+  const handleSelectTemplate = (template: EmailTemplate) => {
+    const safeTemplateHtml = template.customCodeHtml
+      ? sanitizeEmailHtml(template.customCodeHtml)
+      : undefined;
+
+    setEmailData((prev) => ({
+      ...prev,
+      activeTemplateId: template.id,
+      headerTitle: template.headerTitle || prev.headerTitle,
+      greeting: template.greeting || prev.greeting,
+      buttonText: template.buttonText || prev.buttonText,
+      buttonUrl: template.buttonUrl || prev.buttonUrl,
+      bodyText: template.bodyText || prev.bodyText,
+      footerText: template.footerText || prev.footerText,
+      primaryColor: template.primaryColor || prev.primaryColor,
+      customCodeHtml: safeTemplateHtml,
+      contentSource: 'blocks',
+    }));
+
+    if (safeTemplateHtml) {
+      const parsed = parseHtmlToBlocks(safeTemplateHtml);
+      if (parsed && parsed.length > 0) {
+        setBlocks(parsed);
+        setSelectedBlockId(parsed[0].id);
+        pushToHistory(parsed);
+        showToast(`✓ Modelo "${template.name}" carregado com sucesso!`);
+        return;
+      }
+    }
+    showToast(`✓ Modelo "${template.name}" carregado!`);
+  };
+
+  const handleImportHtmlContent = (rawHtml: string) => {
+    const safeHtml = sanitizeEmailHtml(rawHtml);
+    setEmailData((prev) => ({
+      ...prev,
+      customCodeHtml: safeHtml,
+      contentSource: 'blocks',
+    }));
+    const parsed = parseHtmlToBlocks(safeHtml);
+    if (parsed && parsed.length > 0) {
+      setBlocks(parsed);
+      setSelectedBlockId(parsed[0].id);
+      pushToHistory(parsed);
+    }
+  };
+
+  // Image Upload handler with Firebase & Normalization
+  const handleImageBlockUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      showToast('Por favor, selecione um arquivo de imagem válido (PNG, JPG, WEBP, GIF, SVG).');
+      return;
+    }
+
+    const sizeCheck = checkImageSize(file, 5);
+    if (!sizeCheck.valid) {
+      showToast(`⚠️ ${sizeCheck.message}`);
+      e.target.value = '';
+      return;
+    }
+
+    setIsNormalizing(true);
+    showToast('Otimizando e enviando para Firebase Storage (/emails/)...');
+    try {
+      const normalizedDataUrl = await normalizeImage(file, 1200);
+      const uploadRes = await uploadImage(normalizedDataUrl, file.name);
+
+      if (uploadRes.isPublicUrl) {
+        updateSelectedBlock({ imageUrl: uploadRes.url });
+        if (uploadRes.isFirebase) {
+          showToast('🔥 Imagem enviada para Firebase Storage (/emails/)!');
+        } else {
+          showToast('✨ Imagem hospedada com URL pública HTTPS!');
+        }
+      } else {
+        updateSelectedBlock({ imageUrl: uploadRes.url });
+        showToast('⚠️ Salvo localmente.');
+      }
+    } catch (err: unknown) {
+      console.error('Erro no processamento da imagem:', err);
+      showToast(err instanceof Error ? err.message : 'Não foi possível carregar a imagem selecionada.', 'error');
+    } finally {
+      setIsNormalizing(false);
+      e.target.value = '';
+    }
+  };
+
+  const handleNormalizeExistingImage = async () => {
+    const selected = blocks.find((b) => b.id === selectedBlockId);
+    if (!selected || !selected.imageUrl) {
+      showToast('Insira ou envie uma imagem primeiro para normalizar.');
+      return;
+    }
+
+    setIsNormalizing(true);
+    showToast('Ajustando dimensões para clientes de e-mail...');
+
+    try {
+      const normalized = await normalizeImage(selected.imageUrl, 1200);
+      const res = await uploadImage(normalized, 'email_banner_normalized');
+      updateSelectedBlock({ imageUrl: res.url });
+      if (res.isFirebase) {
+        showToast('🔥 Imagem ajustada e enviada para o Firebase Storage (/emails/)!');
+      } else {
+        showToast('✨ Imagem ajustada e hospedada com URL pública!');
+      }
+    } catch (err) {
+      showToast('Não foi possível ajustar a imagem.');
+    } finally {
+      setIsNormalizing(false);
+    }
+  };
+
+  const handleUploadExistingImage = async () => {
+    const selected = blocks.find((b) => b.id === selectedBlockId);
+    if (!selected || !selected.imageUrl) {
+      showToast('Nenhuma imagem selecionada para hospedar.');
+      return;
+    }
+
+    setIsNormalizing(true);
+    showToast('Enviando para o Firebase Storage (/emails/)...');
+
+    try {
+      const res = await uploadImage(selected.imageUrl, 'email_banner');
+      if (res.isPublicUrl) {
+        updateSelectedBlock({ imageUrl: res.url });
+        showToast('🔥 Imagem enviada para o Firebase Storage (/emails/)!');
+      } else {
+        showToast(res.message);
+      }
+    } catch (err) {
+      showToast('Não foi possível realizar o upload da imagem.');
+    } finally {
+      setIsNormalizing(false);
+    }
+  };
+
+  // Text Selection and Links
   const handleTextSelectOrChange = (
     e: React.SyntheticEvent<HTMLInputElement | HTMLTextAreaElement>,
     fieldName: string
@@ -651,12 +638,11 @@ export const GeradorProScreen: React.FC<GeradorProScreenProps> = ({
     const fullText = target.value;
 
     if (start < end) {
-      const selectedText = fullText.substring(start, end);
       setActiveSelection({
         fieldName,
         start,
         end,
-        selectedText,
+        selectedText: fullText.substring(start, end),
       });
     } else {
       setActiveSelection({
@@ -669,26 +655,13 @@ export const GeradorProScreen: React.FC<GeradorProScreenProps> = ({
   };
 
   const handleOpenLinkModal = () => {
-    if (!selectedBlock) return;
-    const defaultField = (
-      (selectedBlock.type === 'header' || selectedBlock.type === 'header_text') ? 'headerTitle' :
-      selectedBlock.type === 'footer' ? 'footerText' :
-      selectedBlock.type === 'button' ? 'buttonLabel' : 'text'
-    );
-    const fieldName = activeSelection?.fieldName || defaultField;
-    const fullText = String((selectedBlock as any)[fieldName] || '');
+    const selected = blocks.find((b) => b.id === selectedBlockId);
+    if (!selected) return;
 
     let selText = activeEditorRef.current?.getSelectionText() || activeSelection?.selectedText || '';
     const cleanSelText = selText.replace(/<[^>]*>/g, '');
-
-    let existingUrl = 'https://';
-    const hrefMatch = selText.match(/href=["']([^"']+)["']/i) || fullText.match(/href=["']([^"']+)["']/i);
-    if (hrefMatch) {
-      existingUrl = hrefMatch[1];
-    }
-
     setLinkText(cleanSelText);
-    setLinkUrl(existingUrl);
+    setLinkUrl('https://');
     setLinkModalOpen(true);
   };
 
@@ -714,18 +687,19 @@ export const GeradorProScreen: React.FC<GeradorProScreenProps> = ({
 
     if (activeEditorRef.current) {
       activeEditorRef.current.insertHtml(linkHtml);
-      showToast(`Link "${displayText}" inserido com sucesso no texto!`);
-    } else if (selectedBlock) {
-      const defaultField = (
-        (selectedBlock.type === 'header' || selectedBlock.type === 'header_text') ? 'headerTitle' :
-        selectedBlock.type === 'footer' ? 'footerText' :
-        selectedBlock.type === 'button' ? 'buttonLabel' : 'text'
-      );
-
-      const fieldName = activeSelection?.fieldName || defaultField;
-      const fullText = String((selectedBlock as any)[fieldName] || '');
-      updateSelectedBlock({ [fieldName]: fullText ? (fullText + ' ' + linkHtml) : linkHtml });
-      showToast(`Link "${displayText}" inserido com sucesso!`);
+      showToast(`Link "${displayText}" inserido no texto!`);
+    } else if (selectedBlockId) {
+      const selected = blocks.find((b) => b.id === selectedBlockId);
+      if (selected) {
+        const defaultField = (
+          (selected.type === 'header' || selected.type === 'header_text') ? 'headerTitle' :
+          selected.type === 'footer' ? 'footerText' :
+          selected.type === 'button' ? 'buttonLabel' : 'text'
+        );
+        const curr = String((selected as any)[defaultField] || '');
+        updateSelectedBlock({ [defaultField]: curr ? `${curr} ${linkHtml}` : linkHtml });
+        showToast(`Link "${displayText}" inserido!`);
+      }
     }
 
     setLinkModalOpen(false);
@@ -737,18 +711,6 @@ export const GeradorProScreen: React.FC<GeradorProScreenProps> = ({
     if (activeEditorRef.current) {
       activeEditorRef.current.execCommand('unlink');
       showToast('Link removido do texto.');
-    } else if (selectedBlock) {
-      const defaultField = (
-        (selectedBlock.type === 'header' || selectedBlock.type === 'header_text') ? 'headerTitle' :
-        selectedBlock.type === 'footer' ? 'footerText' :
-        selectedBlock.type === 'button' ? 'buttonLabel' : 'text'
-      );
-
-      const fieldName = activeSelection?.fieldName || defaultField;
-      const fullText = String((selectedBlock as any)[fieldName] || '');
-      const cleanText = fullText.replace(/<a\b[^>]*>([\s\S]*?)<\/a>/gi, '$1');
-      updateSelectedBlock({ [fieldName]: cleanText });
-      showToast('Links removidos do texto.');
     }
     setLinkModalOpen(false);
   };
@@ -758,15 +720,15 @@ export const GeradorProScreen: React.FC<GeradorProScreenProps> = ({
     formatValue?: string | number,
     colorTargetKey?: 'textColor' | 'headerTextColor' | 'buttonTextColor' | 'footerTextColor'
   ) => {
-    if (!selectedBlock) return;
+    const selected = blocks.find((b) => b.id === selectedBlockId);
+    if (!selected) return;
 
     if (formatType === 'color' && formatValue) {
       const colorVal = String(formatValue);
       const targetField = colorTargetKey || (
-        (selectedBlock.type === 'header' || selectedBlock.type === 'header_text') ? 'headerTextColor' :
-        selectedBlock.type === 'footer' ? 'footerTextColor' :
-        selectedBlock.type === 'button' ? 'buttonTextColor' :
-        'textColor'
+        (selected.type === 'header' || selected.type === 'header_text') ? 'headerTextColor' :
+        selected.type === 'footer' ? 'footerTextColor' :
+        selected.type === 'button' ? 'buttonTextColor' : 'textColor'
       );
       updateSelectedBlock({ [targetField]: colorVal, textColor: colorVal });
     }
@@ -786,17 +748,13 @@ export const GeradorProScreen: React.FC<GeradorProScreenProps> = ({
           activeEditorRef.current.execCommand('strikeThrough');
           break;
         case 'color':
-          if (formatValue) {
-            activeEditorRef.current.execCommand('foreColor', String(formatValue));
-          }
+          if (formatValue) activeEditorRef.current.execCommand('foreColor', String(formatValue));
           break;
         case 'clear':
           activeEditorRef.current.execCommand('removeFormat');
           break;
         case 'variable':
-          if (formatValue) {
-            activeEditorRef.current.insertHtml(` ${formatValue} `);
-          }
+          if (formatValue) activeEditorRef.current.insertHtml(` ${formatValue} `);
           break;
         case 'link':
           handleOpenLinkModal();
@@ -807,23 +765,17 @@ export const GeradorProScreen: React.FC<GeradorProScreenProps> = ({
       }
       showToast('Formatação aplicada no editor de texto!');
     } else {
-      if (formatType === 'bold') {
-        updateSelectedBlock({ isBold: !selectedBlock.isBold });
-      } else if (formatType === 'italic') {
-        updateSelectedBlock({ isItalic: !selectedBlock.isItalic });
-      } else if (formatType === 'underline') {
-        updateSelectedBlock({ isUnderline: !selectedBlock.isUnderline });
-      } else if (formatType === 'strikethrough') {
-        updateSelectedBlock({ isStrikethrough: !selectedBlock.isStrikethrough });
-      } else if (formatType === 'color' && formatValue) {
-        // Handled above
-      } else if (formatType === 'variable' && formatValue) {
+      if (formatType === 'bold') updateSelectedBlock({ isBold: !selected.isBold });
+      else if (formatType === 'italic') updateSelectedBlock({ isItalic: !selected.isItalic });
+      else if (formatType === 'underline') updateSelectedBlock({ isUnderline: !selected.isUnderline });
+      else if (formatType === 'strikethrough') updateSelectedBlock({ isStrikethrough: !selected.isStrikethrough });
+      else if (formatType === 'variable' && formatValue) {
         const defaultField = (
-          (selectedBlock.type === 'header' || selectedBlock.type === 'header_text') ? 'headerTitle' :
-          selectedBlock.type === 'footer' ? 'footerText' :
-          selectedBlock.type === 'button' ? 'buttonLabel' : 'text'
+          (selected.type === 'header' || selected.type === 'header_text') ? 'headerTitle' :
+          selected.type === 'footer' ? 'footerText' :
+          selected.type === 'button' ? 'buttonLabel' : 'text'
         );
-        const curr = String((selectedBlock as any)[defaultField] || '');
+        const curr = String((selected as any)[defaultField] || '');
         updateSelectedBlock({ [defaultField]: curr + ` ${formatValue} ` });
       }
     }
@@ -833,147 +785,152 @@ export const GeradorProScreen: React.FC<GeradorProScreenProps> = ({
     applyFormattingToSelection('variable', varName);
   };
 
+  const handleInlineBlockEdit = useCallback((blockId: string, field: keyof EmailBlock, value: string) => {
+    const target = blocks.find((block) => block.id === blockId);
+    if (!target) return;
+    setSelectedBlockId(blockId);
+    updateSelectedBlockForId(blockId, { [field]: value });
+  }, [blocks]);
+
+  const updateSelectedBlockForId = (targetId: string, updatedProps: Partial<EmailBlock>) => {
+    const safeProps = sanitizeBlockPropertyUpdate(updatedProps);
+    if (!Object.keys(safeProps).length) return;
+    const nextBlocks = blocks.map((block) => block.id === targetId ? { ...block, ...safeProps } : block);
+    setBlocks(nextBlocks);
+    pushToHistory(nextBlocks);
+  };
+
+  const selectedBlock = blocks.find((b) => b.id === selectedBlockId) || null;
+
   return (
-    <div className="flex-grow bg-slate-50/60 pt-20 pb-28 px-4 md:px-8 max-w-7xl mx-auto w-full">
-      {/* Toast Notification */}
-      {toastMessage && (
-        <div className="fixed top-20 right-6 bg-indigo-600 text-white font-semibold px-4 py-3 rounded-lg shadow-xl z-50 flex items-center gap-2 animate-bounce">
-          <span className="material-symbols-outlined text-[20px]">check_circle</span>
-          <span>{toastMessage}</span>
-        </div>
-      )}
+    <>
+      {toastMessage && <Toast message={toastMessage.message} kind={toastMessage.kind} onClose={() => setToastMessage(null)} />}
+    <div className="flex flex-col pt-16 h-full w-full overflow-hidden bg-slate-100 font-sans">
 
-      {/* Main Container */}
-      <div className="bg-white border border-slate-200/90 rounded-2xl p-6 md:p-8 shadow-xs space-y-8">
-        {/* Header Block */}
-        <div className="border-b border-slate-100 pb-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div>
-            <div className="flex items-center gap-2 text-indigo-600 mb-1.5">
-              <span className="material-symbols-outlined text-2xl" style={{ fontVariationSettings: "'FILL' 1" }}>
-                extension
-              </span>
-              <h1 className="text-base md:text-lg font-bold tracking-wide uppercase text-slate-900 flex items-center gap-2">
-                <span>GERADOR VISUAL — CONSTRUTOR POR BLOCOS</span>
-                <span className="text-[11px] bg-indigo-100 text-indigo-800 font-extrabold px-2 py-0.5 rounded-full">
-                  MODULAR & FORMATADO
-                </span>
-              </h1>
-            </div>
-            <p className="text-xs md:text-sm text-slate-500 leading-relaxed max-w-4xl">
-              Monte seu e-mail personalizando textos, tamanhos de fontes, cores, estilos (negrito, itálico, sublinhado) e muito mais.
-            </p>
-          </div>
+      {/* Modern Fixed Top Bar */}
+      <EditorTopBar
+        subject={emailData.subject || 'E-mail sem assunto'}
+        onSubjectChange={(newSubject) => setEmailData((prev) => ({ ...prev, subject: newSubject }))}
+        canUndo={canUndo}
+        canRedo={canRedo}
+        onUndo={handleUndo}
+        onRedo={handleRedo}
+        previewDevice={previewDevice}
+        setPreviewDevice={setPreviewDevice}
+        lastSavedTime={lastSavedTime}
+        onOpenImportModal={() => setIsImportModalOpen(true)}
+        onOpenExportModal={() => setIsExportModalOpen(true)}
+        onNavigateToPreview={() => onNavigate('visualizacao', 'push')}
+        onNavigateHome={() => onNavigate('inicio', 'none')}
+        onSave={persistTemplate}
+        onOpenTemplates={() => { setSavedTemplates(listSavedTemplates()); setIsTemplateManagerOpen(true); }}
+        saveStatus={saveStatus}
+      />
 
-          <div className="flex items-center gap-2 shrink-0">
-            {/* Hidden HTML File Input */}
-            <input
-              type="file"
-              ref={fileInputRef}
-              onChange={handleFileUpload}
-              accept=".html,.htm,text/html"
-              className="hidden"
-            />
+      {/* Main SaaS Workspace with 3 Distinct Panels */}
+      <div className="flex-grow flex overflow-hidden w-full relative">
+        {/* Panel A: Left Sidebar (Blocks, Layers & Templates) */}
+        <aside className="w-72 lg:w-80 shrink-0 h-full overflow-hidden hidden md:flex flex-col z-10 shadow-xs">
+          <BlocksSidebar
+            blocks={blocks}
+            selectedBlockId={selectedBlockId}
+            setSelectedBlockId={setSelectedBlockId}
+            onAddBlock={handleAddBlock}
+            onReorder={handleReorder}
+            onMoveUp={handleMoveUp}
+            onMoveDown={handleMoveDown}
+            onDuplicate={handleDuplicate}
+            onDelete={handleDelete}
+            onSelectTemplate={handleSelectTemplate}
+            activeTemplateId={emailData.activeTemplateId}
+          />
+        </aside>
 
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              className="px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-semibold rounded-lg border border-emerald-300 transition-all active:scale-95 flex items-center gap-1.5 text-xs shadow-2xs cursor-pointer"
-              title="Importar um arquivo HTML para edição no Editor"
-            >
-              <span className="material-symbols-outlined text-[16px]">upload_file</span>
-              <span>Importar HTML</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setBlocks(DEFAULT_BLOCKS)}
-              className="px-3 py-1.5 border border-slate-300 text-slate-700 hover:bg-slate-100 font-semibold rounded-lg text-xs transition-all flex items-center gap-1 cursor-pointer"
-            >
-              <span className="material-symbols-outlined text-[16px]">restart_alt</span>
-              <span>Resetar</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => onNavigate('visualizacao', 'push')}
-              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-lg shadow-xs transition-all active:scale-95 flex items-center gap-1.5 text-xs cursor-pointer"
-            >
-              <span className="material-symbols-outlined text-[18px]">visibility</span>
-              <span>Ver Visualização</span>
-            </button>
-          </div>
-        </div>
-
-        {/* Modelos Prontos de E-mail (Templates) */}
-        <TemplateSelector
-          activeTemplateId={emailData.activeTemplateId}
-          onSelectTemplate={handleSelectModel}
-        />
-
-        {/* Split Screen Layout (Editor Left + Canvas Right) */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-          {/* Left Column: Blocks Management & Selected Block Properties */}
-          <div className="lg:col-span-7 xl:col-span-6 space-y-6">
-            {/* Blocks Structure Sidebar */}
-            <BlocksSidebar
-              blocks={blocks}
-              selectedBlockId={selectedBlockId}
-              setSelectedBlockId={setSelectedBlockId}
-              onAddBlock={handleAddBlock}
-              onReorder={handleReorder}
-              onMoveUp={handleMoveUp}
-              onMoveDown={handleMoveDown}
-              onDuplicate={handleDuplicate}
-              onDelete={handleDelete}
-              draggedIdx={draggedIdx}
-              setDraggedIdx={setDraggedIdx}
-              dragOverIdx={dragOverIdx}
-              setDragOverIdx={setDragOverIdx}
-              isAddBlockMenuOpen={isAddBlockMenuOpen}
-              setIsAddBlockMenuOpen={setIsAddBlockMenuOpen}
-              openCardMenuId={openCardMenuId}
-              setOpenCardMenuId={setOpenCardMenuId}
-            />
-
-            {/* Selected Block Properties Panel */}
-            <PropertiesPanel
-              selectedBlock={selectedBlock}
-              updateSelectedBlock={updateSelectedBlock}
-              applyFormattingToSelection={applyFormattingToSelection}
-              insertVariableToSelectedBlock={insertVariableToSelectedBlock}
-              activeSelection={activeSelection}
-              linkModalOpen={linkModalOpen}
-              setLinkModalOpen={setLinkModalOpen}
-              linkText={linkText}
-              setLinkText={setLinkText}
-              linkUrl={linkUrl}
-              setLinkUrl={setLinkUrl}
-              onSaveLink={handleSaveLink}
-              onRemoveLink={handleRemoveLinkFromBlock}
-              handleOpenLinkModal={handleOpenLinkModal}
-              handleDuplicate={handleDuplicate}
-              handleAddBlock={handleAddBlock}
-              handleTextSelectOrChange={handleTextSelectOrChange}
-              activeEditorRef={activeEditorRef}
-              imageFileInputRef={imageFileInputRef}
-              handleImageBlockUpload={handleImageBlockUpload}
-              handleNormalizeExistingImage={handleNormalizeExistingImage}
-              handleUploadExistingToPublicHost={handleUploadExistingToPublicHost}
-              isNormalizing={isNormalizing}
-            />
-          </div>
-
-          {/* Right Column: Real-time Live Canvas Simulation */}
+        {/* Panel B: Center Canvas (The Email Document) */}
+        <main className="flex-grow h-full overflow-hidden flex flex-col min-w-0">
           <PreviewCanvas
             compiledHtml={compiledHtml}
+            blocks={blocks}
+            selectedBlockId={selectedBlockId}
+            setSelectedBlockId={setSelectedBlockId}
+            onInlineBlockEdit={handleInlineBlockEdit}
             previewDevice={previewDevice}
             setPreviewDevice={setPreviewDevice}
             iframeHeight={iframeHeight}
             onExpand={() => onNavigate('visualizacao', 'push')}
             handleIframeLoad={handleIframeLoad}
             iframeRef={previewIframeRef}
+            onMoveUp={handleMoveUp}
+            onMoveDown={handleMoveDown}
+            onDuplicate={handleDuplicate}
+            onDelete={handleDelete}
+            onAddBlock={handleAddBlock}
+            onOpenTemplates={() => {
+              // Switches to templates view in sidebar
+            }}
           />
-        </div>
+        </main>
+
+        {/* Panel C: Right Sidebar (Properties Panel with Collapsible Accordion) */}
+        <aside className="w-80 lg:w-88 shrink-0 h-full overflow-hidden hidden lg:flex flex-col z-10 shadow-xs">
+          <PropertiesPanel
+            selectedBlock={selectedBlock}
+            updateSelectedBlock={updateSelectedBlock}
+            applyFormattingToSelection={applyFormattingToSelection}
+            insertVariableToSelectedBlock={insertVariableToSelectedBlock}
+            activeSelection={activeSelection}
+            linkModalOpen={linkModalOpen}
+            setLinkModalOpen={setLinkModalOpen}
+            linkText={linkText}
+            setLinkText={setLinkText}
+            linkUrl={linkUrl}
+            setLinkUrl={setLinkUrl}
+            onSaveLink={handleSaveLink}
+            onRemoveLink={handleRemoveLinkFromBlock}
+            handleOpenLinkModal={handleOpenLinkModal}
+            handleDuplicate={handleDuplicate}
+            handleDeleteBlock={handleDelete}
+            onCloseSelection={() => setSelectedBlockId(null)}
+            handleAddBlock={handleAddBlock}
+            handleTextSelectOrChange={handleTextSelectOrChange}
+            activeEditorRef={activeEditorRef}
+            imageFileInputRef={imageFileInputRef}
+            handleImageBlockUpload={handleImageBlockUpload}
+            handleNormalizeExistingImage={handleNormalizeExistingImage}
+            handleUploadExistingImage={handleUploadExistingImage}
+            isNormalizing={isNormalizing}
+            emailData={emailData}
+            setEmailData={setEmailData}
+          />
+        </aside>
       </div>
+
+      {/* Export HTML Modal */}
+      <ExportModal
+        isOpen={isExportModalOpen}
+        onClose={() => setIsExportModalOpen(false)}
+        compiledHtml={transportHtml}
+        subject={emailData.subject || ''}
+        onShowToast={showToast}
+      />
+
+      {/* Import HTML Modal */}
+      <ImportModal
+        isOpen={isImportModalOpen}
+        onClose={() => setIsImportModalOpen(false)}
+        onImportHtml={handleImportHtmlContent}
+        onShowToast={showToast}
+      />
+
+      <TemplateManagerModal
+        isOpen={isTemplateManagerOpen}
+        templates={savedTemplates}
+        onClose={() => setIsTemplateManagerOpen(false)}
+        onLoad={handleLoadSavedTemplate}
+        onDelete={handleDeleteSavedTemplate}
+        onRestoreVersion={handleRestoreVersion}
+      />
     </div>
+    </>
   );
 };

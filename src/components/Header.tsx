@@ -13,7 +13,7 @@ export const Header: React.FC<HeaderProps> = ({ currentScreen, onNavigate, subti
       {/* Branding */}
       <div 
         className="flex items-center gap-3 cursor-pointer select-none"
-        onClick={() => onNavigate('inicio', 'none')}
+        onClick={() => onNavigate('inicio', 'none')} aria-current={currentScreen === 'inicio' ? 'page' : undefined}
       >
         <img 
           src="/favicon.svg" 
@@ -33,9 +33,9 @@ export const Header: React.FC<HeaderProps> = ({ currentScreen, onNavigate, subti
       </div>
 
       {/* Segmented Control Nav */}
-      <nav className="flex items-center space-x-1 sm:space-x-2 bg-slate-100 p-1 rounded-lg border border-slate-200/80">
+      <nav aria-label="Navegação principal" className="flex items-center space-x-1 sm:space-x-2 bg-slate-100 p-1 rounded-lg border border-slate-200/80 max-w-[58vw] overflow-x-auto no-scrollbar">
         <button
-          onClick={() => onNavigate('inicio', 'none')}
+          onClick={() => onNavigate('inicio', 'none')} aria-current={currentScreen === 'inicio' ? 'page' : undefined}
           className={`px-2.5 sm:px-4 py-1.5 rounded-md text-xs sm:text-sm font-medium transition-all flex items-center gap-1 ${
             currentScreen === 'inicio'
               ? 'bg-white text-blue-700 shadow-xs font-semibold'

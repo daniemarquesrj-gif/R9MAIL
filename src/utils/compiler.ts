@@ -1,4 +1,5 @@
 import { EmailData, EmailBlock, BlockType } from '../types';
+import { escapeHtml, sanitizeCssValue, sanitizeEmailHtml, sanitizeRichText, sanitizeUrl } from './security';
 
 /**
  * Helper to get default font size for a block type.
@@ -38,8 +39,8 @@ export function buildTextStyle(
   }
   const sizeMap: Record<string, number> = { sm: 18, md: 22, lg: 26, xl: 30 };
   const size = block.fontSizePx || (block.fontSize ? sizeMap[block.fontSize] : defaultSize) || defaultSize;
-  const color = block.textColor || defaultColor;
-  const align = block.alignment || defaultAlign;
+  const color = sanitizeCssValue(block.textColor || defaultColor, defaultColor);
+  const align = ['left', 'center', 'right', 'justify'].includes(block.alignment || '') ? block.alignment! : defaultAlign;
   const bold = block.isBold ? 'font-weight: bold;' : 'font-weight: normal;';
   const italic = block.isItalic ? 'font-style: italic;' : 'font-style: normal;';
   
@@ -48,9 +49,9 @@ export function buildTextStyle(
   if (block.isStrikethrough) decos.push('line-through');
   const decoStr = decos.length > 0 ? `text-decoration: ${decos.join(' ')};` : 'text-decoration: none;';
 
-  const transform = block.textTransform && block.textTransform !== 'none' ? `text-transform: ${block.textTransform};` : '';
-  const fontFam = block.fontFamily ? `font-family: ${block.fontFamily};` : 'font-family: Helvetica, Arial, sans-serif;';
-  const lHeight = block.lineHeight ? `line-height: ${block.lineHeight};` : 'line-height: 1.5;';
+  const transform = block.textTransform && ['none', 'uppercase', 'lowercase', 'capitalize'].includes(block.textTransform) && block.textTransform !== 'none' ? `text-transform: ${block.textTransform};` : '';
+  const fontFam = block.fontFamily ? `font-family: ${sanitizeCssValue(block.fontFamily, 'Helvetica, Arial, sans-serif')};` : 'font-family: Helvetica, Arial, sans-serif;';
+  const lHeight = block.lineHeight ? `line-height: ${sanitizeCssValue(block.lineHeight, '1.5')};` : 'line-height: 1.5;';
 
   return `color: ${color}; font-size: ${size}px; text-align: ${align}; ${bold} ${italic} ${decoStr} ${transform} ${fontFam} ${lHeight}`.trim();
 }
@@ -59,18 +60,25 @@ export function buildTextStyle(
  * Generates email-compliant HTML for a single block.
  * Includes data-block-id for granular, in-place DOM preview updates.
  */
+const safeRich = (value: unknown): string => sanitizeRichText(value);
+const safeAttr = (value: unknown): string => escapeHtml(value);
+const safeCss = (value: unknown, fallback = ''): string => sanitizeCssValue(value, fallback);
+const safeHref = (value: unknown, fallback = '#'): string => sanitizeUrl(value, 'href') || fallback;
+const safeSrc = (value: unknown, fallback = ''): string => sanitizeUrl(value, 'src') || fallback;
+
 export function generateSingleBlockHtml(block: EmailBlock): string {
   if (!block || !block.type) return '';
-  const blockIdAttr = block.id ? `data-block-id="${block.id}" id="preview-block-${block.id}"` : '';
+  const safeBlockId = block.id ? safeAttr(block.id) : '';
+  const blockIdAttr = safeBlockId ? `data-block-id="${safeBlockId}" id="preview-block-${safeBlockId}"` : '';
 
   switch (block.type) {
     case 'header_text':
     case 'header': {
-      const bg = block.headerBgColor || block.bgColor || '#003bb3';
+      const bg = safeCss(block.headerBgColor || block.bgColor || '#003bb3', '#003bb3');
       const rawTitle = block.headerTitle || 'ESTÁCIO\nSUA MATRÍCULA\nCOMEÇA AQUI!';
-      const formattedTitle = String(rawTitle).replace(/\n/g, '<br/>');
+      const formattedTitle = safeRich(String(rawTitle).replace(/\n/g, '<br/>'));
       const rawSubtitle = block.headerSubtitle;
-      const formattedSubtitle = rawSubtitle ? String(rawSubtitle).replace(/\n/g, '<br/>') : '';
+      const formattedSubtitle = rawSubtitle ? safeRich(String(rawSubtitle).replace(/\n/g, '<br/>')) : '';
 
       const titleSize = block.fontSizePx || 28;
       const style = buildTextStyle(
@@ -80,25 +88,27 @@ export function generateSingleBlockHtml(block: EmailBlock): string {
         block.alignment || 'center'
       );
 
-      const subColor = block.headerSubtitleColor || '#ffffff';
-      const subSize = block.headerSubtitleSizePx || 16;
+      const subColor = safeCss(block.headerSubtitleColor || '#ffffff', '#ffffff');
+      const subSize = Number.isFinite(block.headerSubtitleSizePx) ? Math.max(8, Math.min(72, Number(block.headerSubtitleSizePx))) : 16;
       const align = block.alignment || 'center';
 
       return `
     <div ${blockIdAttr} style="background-color: ${bg}; padding: 36px 24px; text-align: ${align}; font-family: Helvetica, Arial, sans-serif;">
-      <h1 style="margin: 0; ${style}; line-height: 1.25; letter-spacing: 0.5px;">${formattedTitle}</h1>
-      ${formattedSubtitle ? `<p style="margin: 16px 0 0 0; color: ${subColor}; font-size: ${subSize}px; font-weight: 500; text-align: ${align}; line-height: 1.4;">${formattedSubtitle}</p>` : ''}
+      <h1 data-inline-edit="headerTitle" style="margin: 0; ${style}; line-height: 1.25; letter-spacing: 0.5px;">${formattedTitle}</h1>
+      ${formattedSubtitle ? `<p data-inline-edit="headerSubtitle" style="margin: 16px 0 0 0; color: ${subColor}; font-size: ${subSize}px; font-weight: 500; text-align: ${align}; line-height: 1.4;">${formattedSubtitle}</p>` : ''}
     </div>`;
     }
 
     case 'header_image': {
-      const imgUrl = block.imageUrl || 'https://images.unsplash.com/photo-1579546929518-9e396f3cc809?auto=format&fit=crop&w=600&h=200&q=80';
-      const alt = block.imageAlt || 'Cabeçalho do E-mail';
-      const link = block.imageLink;
-      const caption = block.imageCaption;
-      const bgStyle = block.bgColor ? `background-color: ${block.bgColor};` : '';
+      const imgUrl = safeSrc(block.imageUrl, '');
+      const alt = safeAttr(block.imageAlt || 'Cabeçalho do E-mail');
+      const link = sanitizeUrl(block.imageLink, 'href');
+      const caption = block.imageCaption ? safeRich(block.imageCaption) : '';
+      const bgStyle = block.bgColor ? `background-color: ${safeCss(block.bgColor)};` : '';
 
-      let imgHtml = `<img src="${imgUrl}" alt="${alt}" class="email-header-img" width="100%" style="width: 100% !important; max-width: 100% !important; height: auto !important; display: block; border: 0; outline: none; margin: 0 auto; object-fit: cover;" />`;
+      let imgHtml = imgUrl
+        ? `<img src="${imgUrl}" alt="${alt}" class="email-header-img" width="100%" style="width: 100% !important; max-width: 100% !important; height: auto !important; display: block; border: 0; outline: none; margin: 0 auto; object-fit: cover;" />`
+        : `<div role="img" aria-label="${alt}" style="padding:32px 16px;background:#f1f5f9;color:#64748b;text-align:center;font-family:Helvetica,Arial,sans-serif;font-size:13px;">Adicione uma imagem</div>`;
       if (link) {
         imgHtml = `<a href="${link}" target="_blank" style="text-decoration: none; display: block; width: 100%;">${imgHtml}</a>`;
       }
@@ -112,54 +122,54 @@ export function generateSingleBlockHtml(block: EmailBlock): string {
 
     case 'title': {
       const align = block.alignment || 'left';
-      const txt = block.text || 'Título do Bloco';
+      const txt = safeRich(block.text || 'Título do Bloco');
       const style = buildTextStyle(block, 28, '#1e1b4b', align);
-      const bgStyle = block.bgColor ? `background-color: ${block.bgColor};` : '';
+      const bgStyle = block.bgColor ? `background-color: ${safeCss(block.bgColor)};` : '';
 
       return `
     <div ${blockIdAttr} style="padding: 24px 28px 8px 28px; text-align: ${align}; ${bgStyle}">
-      <h2 style="margin: 0; ${style}">${txt}</h2>
+      <h2 data-inline-edit="text" style="margin: 0; ${style}">${txt}</h2>
     </div>`;
     }
 
     case 'subtitle': {
       const align = block.alignment || 'left';
-      const txt = block.text || 'Subtítulo complementar';
+      const txt = safeRich(block.text || 'Subtítulo complementar');
       const style = buildTextStyle(block, 18, '#475569', align);
-      const bgStyle = block.bgColor ? `background-color: ${block.bgColor};` : '';
+      const bgStyle = block.bgColor ? `background-color: ${safeCss(block.bgColor)};` : '';
 
       return `
     <div ${blockIdAttr} style="padding: 4px 28px 12px 28px; text-align: ${align}; ${bgStyle}">
-      <p style="margin: 0; ${style}">${txt}</p>
+      <p data-inline-edit="text" style="margin: 0; ${style}">${txt}</p>
     </div>`;
     }
 
     case 'text': {
       const align = block.alignment || 'left';
       const rawTxt = block.text || 'Insira aqui o texto do seu parágrafo...';
-      const formattedTxt = String(rawTxt).replace(/\n/g, '<br/>');
+      const formattedTxt = safeRich(String(rawTxt).replace(/\n/g, '<br/>'));
       const style = buildTextStyle(block, 15, '#334155', align);
-      const bgStyle = block.bgColor ? `background-color: ${block.bgColor};` : '';
+      const bgStyle = block.bgColor ? `background-color: ${safeCss(block.bgColor)};` : '';
 
       return `
     <div ${blockIdAttr} style="padding: 12px 28px; text-align: ${align}; ${bgStyle}">
-      <div style="${style}">${formattedTxt}</div>
+      <div data-inline-edit="text" style="${style}">${formattedTxt}</div>
     </div>`;
     }
 
     case 'button': {
       const align = block.alignment || 'center';
-      const bg = block.buttonBgColor || '#4f46e5';
-      const color = block.buttonTextColor || '#ffffff';
-      const label = block.buttonLabel || 'Clique Aqui';
-      const url = block.buttonUrl || '#';
+      const bg = safeCss(block.buttonBgColor || '#4f46e5', '#4f46e5');
+      const color = safeCss(block.buttonTextColor || '#ffffff', '#ffffff');
+      const label = safeRich(block.buttonLabel || 'Clique Aqui');
+      const url = safeHref(block.buttonUrl, '#');
       const isFull = block.buttonWidth === 'full';
-      const fontFam = block.fontFamily || 'Helvetica, Arial, sans-serif';
-      const size = block.fontSizePx || 15;
+      const fontFam = safeCss(block.fontFamily || 'Helvetica, Arial, sans-serif', 'Helvetica, Arial, sans-serif');
+      const size = Number.isFinite(block.fontSizePx) ? Math.max(8, Math.min(72, Number(block.fontSizePx))) : 15;
       const bold = block.isBold !== false ? 'font-weight: bold;' : 'font-weight: normal;';
       const italic = block.isItalic ? 'font-style: italic;' : '';
-      const transform = block.textTransform ? `text-transform: ${block.textTransform};` : '';
-      const bgStyle = block.bgColor ? `background-color: ${block.bgColor};` : '';
+      const transform = block.textTransform && ['none', 'uppercase', 'lowercase', 'capitalize'].includes(block.textTransform) ? `text-transform: ${block.textTransform};` : '';
+      const bgStyle = block.bgColor ? `background-color: ${safeCss(block.bgColor)};` : '';
 
       const btnStyle = isFull
         ? `display: block; width: 100%; box-sizing: border-box; text-align: center; background-color: ${bg}; color: ${color} !important; padding: 14px 20px; text-decoration: none; ${bold} ${italic} ${transform} border-radius: 8px; font-size: ${size}px; font-family: ${fontFam};`
@@ -167,19 +177,21 @@ export function generateSingleBlockHtml(block: EmailBlock): string {
 
       return `
     <div ${blockIdAttr} style="padding: 20px 28px; text-align: ${align}; ${bgStyle}">
-      <a href="${url}" class="${isFull ? 'btn btn-full' : 'btn btn-auto'}" style="${btnStyle}">${label}</a>
+      <a data-inline-edit="buttonLabel" href="${url}" class="${isFull ? 'btn btn-full' : 'btn btn-auto'}" style="${btnStyle}">${label}</a>
     </div>`;
     }
 
     case 'image': {
-      const imgUrl = block.imageUrl || 'https://images.unsplash.com/photo-1557804506-669a67965ba0?auto=format&fit=crop&w=600&q=80';
-      const alt = block.imageAlt || 'Banner Promocional';
-      const link = block.imageLink;
-      const caption = block.imageCaption;
-      const bgStyle = block.bgColor ? `background-color: ${block.bgColor};` : '';
+      const imgUrl = safeSrc(block.imageUrl, '');
+      const alt = safeAttr(block.imageAlt || 'Banner Promocional');
+      const link = sanitizeUrl(block.imageLink, 'href');
+      const caption = block.imageCaption ? safeRich(block.imageCaption) : '';
+      const bgStyle = block.bgColor ? `background-color: ${safeCss(block.bgColor)};` : '';
 
-      let imgHtml = `<img src="${imgUrl}" alt="${alt}" class="email-banner-img" width="100%" style="width: 100% !important; max-width: 100% !important; height: auto !important; display: block; border: 0; outline: none; margin: 0 auto; border-radius: 6px; object-fit: contain;" />`;
-      if (link) {
+      let imgHtml = imgUrl
+        ? `<img src="${imgUrl}" alt="${alt}" class="email-banner-img" width="100%" style="width: 100% !important; max-width: 100% !important; height: auto !important; display: block; border: 0; outline: none; margin: 0 auto; border-radius: 6px; object-fit: contain;" />`
+        : `<div role="img" aria-label="${alt}" style="padding:32px 16px;background:#f1f5f9;color:#64748b;text-align:center;font-family:Helvetica,Arial,sans-serif;font-size:13px;">Adicione uma imagem</div>`;
+      if (link && imgUrl) {
         imgHtml = `<a href="${link}" target="_blank" style="text-decoration: none; display: block; width: 100%;">${imgHtml}</a>`;
       }
 
@@ -191,11 +203,11 @@ export function generateSingleBlockHtml(block: EmailBlock): string {
     }
 
     case 'coupon': {
-      const code = block.couponCode || 'DESCONTO20';
-      const discount = block.couponDiscount || '20% OFF NA PRIMEIRA COMPRA';
-      const bg = block.couponBgColor || '#f0fdf4';
-      const border = block.couponBorderColor || '#16a34a';
-      const bgStyle = block.bgColor ? `background-color: ${block.bgColor};` : '';
+      const code = safeRich(block.couponCode || 'DESCONTO20');
+      const discount = safeRich(block.couponDiscount || '20% OFF NA PRIMEIRA COMPRA');
+      const bg = safeCss(block.couponBgColor || '#f0fdf4', '#f0fdf4');
+      const border = safeCss(block.couponBorderColor || '#16a34a', '#16a34a');
+      const bgStyle = block.bgColor ? `background-color: ${safeCss(block.bgColor)};` : '';
 
       return `
     <div ${blockIdAttr} style="padding: 20px 28px; font-family: Helvetica, Arial, sans-serif; ${bgStyle}">
@@ -209,9 +221,9 @@ export function generateSingleBlockHtml(block: EmailBlock): string {
     }
 
     case 'divider': {
-      const style = block.dividerStyle || 'solid';
-      const color = block.dividerColor || '#e2e8f0';
-      const bgStyle = block.bgColor ? `background-color: ${block.bgColor};` : '';
+      const style = ['solid', 'dashed', 'dotted'].includes(block.dividerStyle || '') ? block.dividerStyle! : 'solid';
+      const color = safeCss(block.dividerColor || '#e2e8f0', '#e2e8f0');
+      const bgStyle = block.bgColor ? `background-color: ${safeCss(block.bgColor)};` : '';
 
       return `
     <div ${blockIdAttr} style="padding: 16px 28px; ${bgStyle}">
@@ -220,11 +232,11 @@ export function generateSingleBlockHtml(block: EmailBlock): string {
     }
 
     case 'social': {
-      const insta = block.instagramUrl;
-      const linkedin = block.linkedinUrl;
-      const fb = block.facebookUrl;
-      const web = block.websiteUrl;
-      const bgStyle = block.bgColor ? `background-color: ${block.bgColor};` : '';
+      const insta = sanitizeUrl(block.instagramUrl, 'href');
+      const linkedin = sanitizeUrl(block.linkedinUrl, 'href');
+      const fb = sanitizeUrl(block.facebookUrl, 'href');
+      const web = sanitizeUrl(block.websiteUrl, 'href');
+      const bgStyle = block.bgColor ? `background-color: ${safeCss(block.bgColor)};` : '';
 
       return `
     <div ${blockIdAttr} class="social-block" style="padding: 16px 28px; text-align: center; font-family: Helvetica, Arial, sans-serif; ${bgStyle}">
@@ -238,9 +250,9 @@ export function generateSingleBlockHtml(block: EmailBlock): string {
     }
 
     case 'footer': {
-      const bg = block.footerBgColor || block.bgColor || '#f8fafc';
+      const bg = safeCss(block.footerBgColor || block.bgColor || '#f8fafc', '#f8fafc');
       const rawTxt = block.footerText || '© 2026 Minha Empresa. Todos os direitos reservados.';
-      const formatted = String(rawTxt).replace(/\n/g, '<br/>');
+      const formatted = safeRich(String(rawTxt).replace(/\n/g, '<br/>'));
       const style = buildTextStyle(
         { ...block, textColor: block.footerTextColor || '#64748b' },
         block.fontSizePx || 12,
@@ -326,20 +338,22 @@ export function compileBlocksToHtml(blocks: EmailBlock[]): string {
 
 /**
  * Universal compiler for EmailData.
- * Returns customCodeHtml if set, otherwise compiles a clean responsive template.
+ * Returns the sanitized preview HTML cache when available; the email transport compiler is responsible for choosing the authoritative export source.
  */
 export function compileEmailToHtml(data: EmailData): string {
   if (data.customCodeHtml) {
-    return data.customCodeHtml;
+    // Preview HTML may be user-authored (html mode) or derived from blocks (blocks mode).
+    // In both cases sanitize before rendering/exporting the browser preview.
+    return sanitizeEmailHtml(data.customCodeHtml);
   }
 
-  const primaryColor = data.primaryColor || '#2563eb';
-  const headerTitle = data.headerTitle || 'Aviso Importante';
-  const greeting = data.greeting || 'Olá {{nome}},';
+  const primaryColor = safeCss(data.primaryColor || '#2563eb', '#2563eb');
+  const headerTitle = safeRich(data.headerTitle || 'Aviso Importante');
+  const greeting = safeRich(data.greeting || 'Olá {{nome}},');
   const bodyText = data.bodyText || '';
-  const buttonText = data.buttonText || 'Acessar Conta';
-  const buttonUrl = data.buttonUrl || 'https://estacio.br';
-  const footerText = data.footerText || '© 2026 Estácio. Todos os direitos reservados.';
+  const buttonText = safeRich(data.buttonText || 'Acessar Conta');
+  const buttonUrl = safeHref(data.buttonUrl, 'https://estacio.br');
+  const footerText = safeRich(data.footerText || '© 2026 Estácio. Todos os direitos reservados.');
 
   const isLeft = data.alignment === 'left';
   const textAlign = isLeft ? 'left' : 'center';
@@ -353,7 +367,7 @@ export function compileEmailToHtml(data: EmailData): string {
   const isLargeFont = data.fontSizeLevel === 'large_mobile';
 
   const formattedBody = bodyText
-    ? bodyText.split('\n\n').map(p => p.replace(/\n/g, '<br/>')).join('</p><p style="margin-bottom: 16px;">')
+    ? bodyText.split('\n\n').map(p => safeRich(p.replace(/\n/g, '<br/>'))).join('</p><p style="margin-bottom: 16px;">')
     : 'Temos o prazer de apresentar uma oferta desenhada sob medida para as necessidades de negócios.';
 
   return `<!DOCTYPE html>
@@ -362,7 +376,6 @@ export function compileEmailToHtml(data: EmailData): string {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta http-equiv="X-UA-Compatible" content="IE=edge">
-  <title>${headerTitle}</title>
   <style>
     body, table, td, a { -webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; }
     table, td { mso-table-lspace: 0pt; mso-table-rspace: 0pt; }
@@ -430,7 +443,7 @@ export function compileEmailToHtml(data: EmailData): string {
           </tr>
           <tr>
             <td align="${textAlign}" style="padding: 24px 32px; background-color: #f8fafc; border-top: 1px solid #f1f5f9; color: #64748b; font-size: 12px; line-height: 1.5;" class="email-padding">
-              <p style="margin: 0; white-space: pre-line;">${footerText.replace(/\n/g, '<br/>')}</p>
+              <p style="margin: 0; white-space: pre-line;">${footerText}</p>
             </td>
           </tr>
         </table>
