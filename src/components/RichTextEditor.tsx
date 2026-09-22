@@ -8,6 +8,11 @@ export interface RichTextEditorRef {
   insertText: (text: string) => void;
   getSelectionText: () => string;
   hasSelection: () => boolean;
+  saveSelection: () => void;
+  restoreSelection: () => boolean;
+  hasSavedSelection: () => boolean;
+  clearSavedSelection: () => void;
+  applyInlineStyle: (property: string, value: string) => boolean;
 }
 
 interface RichTextEditorProps {
@@ -95,11 +100,31 @@ export const RichTextEditor = forwardRef<RichTextEditorRef, RichTextEditorProps>
     const handleSelection = () => {
       if (!window.getSelection || !editorRef.current) return;
       const sel = window.getSelection();
-      if (!sel || sel.rangeCount === 0 || !editorRef.current.contains(sel.anchorNode)) return;
+      if (!sel || sel.rangeCount === 0 || !editorRef.current.contains(sel.anchorNode)) {
+        savedSelectionRef.current = null;
+        onSelectionChange?.('');
+        return;
+      }
 
-      savedSelectionRef.current = sel.getRangeAt(0).cloneRange();
-      if (onSelectionChange) {
-        onSelectionChange(sel.toString());
+      const range = sel.getRangeAt(0);
+      if (range.collapsed || !sel.toString()) {
+        savedSelectionRef.current = null;
+        onSelectionChange?.('');
+        return;
+      }
+
+      savedSelectionRef.current = range.cloneRange();
+      onSelectionChange?.(sel.toString());
+    };
+
+    const isSavedSelectionValid = () => {
+      const range = savedSelectionRef.current;
+      const editor = editorRef.current;
+      if (!range || !editor) return false;
+      try {
+        return editor.contains(range.commonAncestorContainer) && !range.collapsed;
+      } catch {
+        return false;
       }
     };
 
@@ -132,6 +157,14 @@ export const RichTextEditor = forwardRef<RichTextEditorRef, RichTextEditorProps>
         if (editorRef.current) {
           editorRef.current.focus();
           const sel = window.getSelection();
+          if (sel && savedSelectionRef.current) {
+            try {
+              sel.removeAllRanges();
+              sel.addRange(savedSelectionRef.current);
+            } catch {
+              // The DOM may have changed; fall back to the current caret.
+            }
+          }
           if (sel && sel.rangeCount > 0) {
             const range = sel.getRangeAt(0);
             range.deleteContents();
@@ -149,6 +182,7 @@ export const RichTextEditor = forwardRef<RichTextEditorRef, RichTextEditorProps>
               range.collapse(true);
               sel.removeAllRanges();
               sel.addRange(range);
+              savedSelectionRef.current = range.cloneRange();
             }
           } else {
             editorRef.current.innerHTML += sanitizeRichText(html);
@@ -159,8 +193,18 @@ export const RichTextEditor = forwardRef<RichTextEditorRef, RichTextEditorProps>
       insertText: (text: string) => {
         if (editorRef.current) {
           editorRef.current.focus();
+          const sel = window.getSelection();
+          if (sel && savedSelectionRef.current) {
+            try {
+              sel.removeAllRanges();
+              sel.addRange(savedSelectionRef.current);
+            } catch {
+              // The DOM may have changed; keep the current caret.
+            }
+          }
           document.execCommand('insertText', false, text);
           handleInput();
+          handleSelection();
         }
       },
       getSelectionText: () => {
@@ -170,6 +214,53 @@ export const RichTextEditor = forwardRef<RichTextEditorRef, RichTextEditorProps>
       hasSelection: () => {
         const sel = window.getSelection();
         return Boolean(sel && sel.toString().length > 0);
+      },
+      saveSelection: () => {
+        handleSelection();
+      },
+      restoreSelection: () => {
+        if (!editorRef.current || !savedSelectionRef.current) return false;
+        try {
+          if (!editorRef.current.contains(savedSelectionRef.current.commonAncestorContainer)) return false;
+          const sel = window.getSelection();
+          if (!sel) return false;
+          editorRef.current.focus();
+          sel.removeAllRanges();
+          sel.addRange(savedSelectionRef.current);
+          return true;
+        } catch {
+          return false;
+        }
+      },
+      hasSavedSelection: () => isSavedSelectionValid(),
+      clearSavedSelection: () => {
+        savedSelectionRef.current = null;
+        onSelectionChange?.('');
+      },
+      applyInlineStyle: (property: string, value: string) => {
+        if (!editorRef.current || !isSavedSelectionValid()) return false;
+        try {
+          const sel = window.getSelection();
+          if (!sel || !savedSelectionRef.current) return false;
+          editorRef.current.focus();
+          sel.removeAllRanges();
+          sel.addRange(savedSelectionRef.current);
+          const range = sel.getRangeAt(0);
+          const wrapper = document.createElement('span');
+          wrapper.style.setProperty(property, value);
+          const fragment = range.extractContents();
+          wrapper.appendChild(fragment);
+          range.insertNode(wrapper);
+          const nextRange = document.createRange();
+          nextRange.selectNodeContents(wrapper);
+          sel.removeAllRanges();
+          sel.addRange(nextRange);
+          savedSelectionRef.current = nextRange.cloneRange();
+          handleInput();
+          return true;
+        } catch {
+          return false;
+        }
       },
     }));
 

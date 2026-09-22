@@ -34,6 +34,7 @@ interface PreviewCanvasProps {
   onDelete: (id: string) => void;
   onAddBlock: (type: BlockType) => void;
   onOpenTemplates: () => void;
+  onOpenBlockSelector: () => void;
 }
 
 export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
@@ -54,6 +55,7 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
   onDelete,
   onAddBlock,
   onOpenTemplates,
+  onOpenBlockSelector,
 }) => {
   const [zoomLevel, setZoomLevel] = useState<number>(100);
   const [isDragOver, setIsDragOver] = useState<boolean>(false);
@@ -63,6 +65,49 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
   const workspaceRef = useRef<HTMLDivElement | null>(null);
   const floatingToolbarRef = useRef<HTMLDivElement | null>(null);
   const inlineSelectionRef = useRef<{ range: Range; blockId: string; field: keyof EmailBlock; element: HTMLElement } | null>(null);
+  const inlineEditTimersRef = useRef<Map<string, number>>(new Map());
+  const pendingInlineEditsRef = useRef<Map<string, { blockId: string; field: keyof EmailBlock; element: HTMLElement }>>(new Map());
+
+  const readInlineEditValue = (element: HTMLElement, field: keyof EmailBlock): string => {
+    return field === 'text' || field === 'headerTitle' || field === 'headerSubtitle'
+      ? element.innerHTML
+      : element.textContent || '';
+  };
+
+  const flushInlineEdit = (key: string) => {
+    const timer = inlineEditTimersRef.current.get(key);
+    if (timer !== undefined) {
+      window.clearTimeout(timer);
+      inlineEditTimersRef.current.delete(key);
+    }
+
+    const pending = pendingInlineEditsRef.current.get(key);
+    if (!pending) return;
+
+    const value = readInlineEditValue(pending.element, pending.field);
+    onInlineBlockEdit(pending.blockId, pending.field, value);
+    pendingInlineEditsRef.current.delete(key);
+  };
+
+  const scheduleInlineEdit = (element: HTMLElement) => {
+    const blockEl = element.closest('[data-block-id]') as HTMLElement | null;
+    const blockId = blockEl?.getAttribute('data-block-id');
+    const field = element.getAttribute('data-inline-edit') as keyof EmailBlock | null;
+    if (!blockId || !field || element.dataset.r9Editing !== 'true') return;
+
+    const key = `${blockId}:${String(field)}`;
+    pendingInlineEditsRef.current.set(key, { blockId, field, element });
+
+    const previousTimer = inlineEditTimersRef.current.get(key);
+    if (previousTimer !== undefined) window.clearTimeout(previousTimer);
+
+    const timer = window.setTimeout(() => flushInlineEdit(key), 350);
+    inlineEditTimersRef.current.set(key, timer);
+  };
+
+  const flushAllInlineEdits = () => {
+    Array.from(pendingInlineEditsRef.current.keys()).forEach(flushInlineEdit);
+  };
 
   const selectedIndex = blocks.findIndex((b) => b.id === selectedBlockId);
   const selectedBlock = selectedIndex !== -1 ? blocks[selectedIndex] : null;
@@ -227,6 +272,15 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
         // focusout borbulha no DOM, portanto funciona como um blur delegado.
         // Isso também continua funcionando quando o elemento editável é
         // reconstruído durante um re-render.
+        // Mantém o estado React sincronizado durante a digitação, mas com debounce.
+        // Assim o painel de propriedades acompanha o que está sendo digitado sem
+        // reconstruir o iframe a cada tecla e destruir o caret/seleção.
+        doc.body.oninput = (event: Event) => {
+          const target = event.target as HTMLElement | null;
+          if (!target || target.dataset.r9Editing !== 'true') return;
+          scheduleInlineEdit(target);
+        };
+
         doc.body.onfocusout = (event: FocusEvent) => {
           const target = event.target as HTMLElement | null;
           if (!target || target.dataset.r9Editing !== 'true') return;
@@ -236,16 +290,18 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
           const field = target.getAttribute('data-inline-edit') as keyof EmailBlock | null;
           if (!blockId || !field) return;
 
-          const value = field === 'text' || field === 'headerTitle' || field === 'headerSubtitle'
-            ? target.innerHTML
-            : target.textContent || '';
+          // Antes de sair do canvas, força a última alteração pendente para o
+          // estado do editor. Isso evita que clicar no painel de propriedades
+          // faça o texto recém-digitado voltar ao valor antigo.
+          const key = `${blockId}:${String(field)}`;
+          pendingInlineEditsRef.current.set(key, { blockId, field, element: target });
+          flushInlineEdit(key);
 
           target.contentEditable = 'false';
           delete target.dataset.r9Editing;
           target.title = 'Duplo clique para editar';
           inlineSelectionRef.current = null;
           setInlineFormatToolbar((prev) => ({ ...prev, visible: false }));
-          onInlineBlockEdit(blockId, field, value);
         };
 
         doc.querySelectorAll<HTMLElement>('[data-inline-edit]').forEach((el) => {
@@ -387,6 +443,15 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
       window.removeEventListener('resize', update);
     };
   }, [selectedBlockId, compiledHtml, previewDevice, zoomLevel, iframeHeight]);
+
+  useEffect(() => {
+    return () => {
+      flushAllInlineEdits();
+      inlineEditTimersRef.current.forEach((timer) => window.clearTimeout(timer));
+      inlineEditTimersRef.current.clear();
+      pendingInlineEditsRef.current.clear();
+    };
+  }, []);
 
   // Handle drop from sidebar
   const handleDropOnCanvas = (e: React.DragEvent) => {
@@ -563,6 +628,18 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
           isDragOver ? 'bg-indigo-50/50 ring-4 ring-indigo-400/20 ring-inset' : ''
         }`}
       >
+        {blocks.length > 0 && (
+          <button
+            type="button"
+            onClick={onOpenBlockSelector}
+            className="md:hidden fixed bottom-5 left-1/2 -translate-x-1/2 z-30 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-full shadow-lg shadow-indigo-900/20 flex items-center gap-2 transition-colors"
+            title="Adicionar bloco"
+          >
+            <Plus className="w-4 h-4" />
+            Adicionar bloco
+          </button>
+        )}
+
         {blocks.length === 0 ? (
           /* Empty State */
           <div className="my-auto max-w-md w-full bg-white border border-dashed border-slate-300 rounded-2xl p-8 text-center shadow-xs space-y-4">

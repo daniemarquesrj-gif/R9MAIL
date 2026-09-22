@@ -34,11 +34,13 @@ interface PropertiesPanelProps {
   selectedBlock: EmailBlock | null;
   updateSelectedBlock: (updatedProps: Partial<EmailBlock>) => void;
   applyFormattingToSelection: (
-    formatType: 'bold' | 'italic' | 'underline' | 'strikethrough' | 'color' | 'fontSize' | 'clear' | 'variable' | 'link' | 'unlink',
+    formatType: 'bold' | 'italic' | 'underline' | 'strikethrough' | 'color' | 'fontSize' | 'fontFamily' | 'clear' | 'variable' | 'link' | 'unlink',
     formatValue?: string | number,
     colorTargetKey?: 'textColor' | 'headerTextColor' | 'buttonTextColor' | 'footerTextColor'
   ) => void;
   insertVariableToSelectedBlock: (varName: string) => void;
+  hasRichTextSelection?: boolean;
+  onRichTextSelectionChange?: (selectedText: string) => void;
   activeSelection: {
     fieldName: string;
     start: number;
@@ -91,6 +93,7 @@ interface SelectableRichTextFieldProps {
   minHeight?: string;
   activeEditorRef: React.MutableRefObject<RichTextEditorRef | null>;
   onFocus?: () => void;
+  onSelectionChange?: (selectedText: string) => void;
 }
 
 const SelectableRichTextField: React.FC<SelectableRichTextFieldProps> = ({
@@ -100,6 +103,7 @@ const SelectableRichTextField: React.FC<SelectableRichTextFieldProps> = ({
   minHeight = '72px',
   activeEditorRef,
   onFocus,
+  onSelectionChange,
 }) => {
   const localRef = useRef<RichTextEditorRef | null>(null);
 
@@ -113,10 +117,9 @@ const SelectableRichTextField: React.FC<SelectableRichTextFieldProps> = ({
           activeEditorRef.current = localRef.current;
           onFocus?.();
         }}
-        onBlur={() => {
-          if (activeEditorRef.current === localRef.current) {
-            activeEditorRef.current = null;
-          }
+        onSelectionChange={(selectedText) => {
+          activeEditorRef.current = localRef.current;
+          onSelectionChange?.(selectedText);
         }}
         placeholder={placeholder}
         minHeight={minHeight}
@@ -141,6 +144,8 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
   applyFormattingToSelection,
   insertVariableToSelectedBlock,
   activeSelection,
+  hasRichTextSelection = false,
+  onRichTextSelectionChange,
   linkModalOpen,
   setLinkModalOpen,
   linkText,
@@ -197,6 +202,37 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
     setTimeout(() => {
       target.selectionStart = target.selectionEnd = start + plainText.length;
     }, 0);
+  };
+
+  const getTextColorField = (): 'textColor' | 'headerTextColor' | 'buttonTextColor' | 'footerTextColor' => {
+    if (selectedBlock?.type === 'header' || selectedBlock?.type === 'header_text') return 'headerTextColor';
+    if (selectedBlock?.type === 'button') return 'buttonTextColor';
+    if (selectedBlock?.type === 'footer') return 'footerTextColor';
+    return 'textColor';
+  };
+
+  const applyTextColor = (color: string) => {
+    if (hasRichTextSelection && activeEditorRef.current?.hasSavedSelection()) {
+      applyFormattingToSelection('color', color, getTextColorField());
+      return;
+    }
+    updateSelectedBlock({ [getTextColorField()]: color });
+  };
+
+  const applyFontSize = (size: number) => {
+    if (hasRichTextSelection && activeEditorRef.current?.hasSavedSelection()) {
+      applyFormattingToSelection('fontSize', size);
+      return;
+    }
+    updateSelectedBlock({ fontSizePx: size });
+  };
+
+  const applyFontFamily = (family: string) => {
+    if (hasRichTextSelection && activeEditorRef.current?.hasSavedSelection()) {
+      applyFormattingToSelection('fontFamily', family);
+      return;
+    }
+    updateSelectedBlock({ fontFamily: family });
   };
 
   // If NO block is selected: Show Global Email Settings
@@ -396,6 +432,7 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                       activeEditorRef={activeEditorRef}
                       value={selectedBlock.headerTitle || ''}
                       onChange={(value) => updateSelectedBlock({ headerTitle: value })}
+                      onSelectionChange={onRichTextSelectionChange}
                       placeholder="ESTÁCIO — SUA MATRÍCULA COMEÇA AQUI!"
                       minHeight="90px"
                     />
@@ -407,6 +444,7 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                       activeEditorRef={activeEditorRef}
                       value={selectedBlock.headerSubtitle || ''}
                       onChange={(value) => updateSelectedBlock({ headerSubtitle: value })}
+                      onSelectionChange={onRichTextSelectionChange}
                       placeholder="Condições especiais para estudar na Estácio R9"
                       minHeight="70px"
                     />
@@ -422,6 +460,7 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                     activeEditorRef={activeEditorRef}
                     value={selectedBlock.text || ''}
                     onChange={(value) => updateSelectedBlock({ text: value })}
+                    onSelectionChange={onRichTextSelectionChange}
                     placeholder="Novidades Exclusivas para {{empresa}}"
                   />
                 </div>
@@ -435,6 +474,7 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                     activeEditorRef={activeEditorRef}
                     value={selectedBlock.text || ''}
                     onChange={(value) => updateSelectedBlock({ text: value })}
+                    onSelectionChange={onRichTextSelectionChange}
                     placeholder="Olá {{nome}}, temos uma atualização especial"
                   />
                 </div>
@@ -455,6 +495,7 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                     activeEditorRef={activeEditorRef}
                     value={selectedBlock.text || ''}
                     onChange={(newHtml) => updateSelectedBlock({ text: newHtml })}
+                    onSelectionChange={onRichTextSelectionChange}
                     placeholder="Escreva seu parágrafo aqui... Cole textos da web sem receio de formatação quebrada."
                     minHeight="140px"
                   />
@@ -470,6 +511,7 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                       activeEditorRef={activeEditorRef}
                       value={selectedBlock.buttonLabel || ''}
                       onChange={(value) => updateSelectedBlock({ buttonLabel: value })}
+                      onSelectionChange={onRichTextSelectionChange}
                       placeholder="Conhecer Plataforma Agora"
                     />
                   </div>
@@ -682,6 +724,7 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                     activeEditorRef={activeEditorRef}
                     value={selectedBlock.footerText || ''}
                     onChange={(value) => updateSelectedBlock({ footerText: value })}
+                    onSelectionChange={onRichTextSelectionChange}
                     placeholder="Você está recebendo este e-mail..."
                     minHeight="100px"
                   />
@@ -713,6 +756,16 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
 
           {openSections.style && (
             <div className="px-4 pb-4 pt-1 space-y-4 text-xs animate-fadeIn">
+              <div className={`rounded-xl border px-3 py-2.5 ${hasRichTextSelection ? 'border-indigo-200 bg-indigo-50/70' : 'border-slate-200 bg-slate-50/70'}`}>
+                <div className={`flex items-center gap-2 text-[11px] font-bold ${hasRichTextSelection ? 'text-indigo-700' : 'text-slate-600'}`}>
+                  <Type className="w-3.5 h-3.5" />
+                  <span>{hasRichTextSelection ? 'Texto selecionado' : 'Estilo do bloco'}</span>
+                </div>
+                <p className="mt-1 text-[10px] leading-relaxed text-slate-500">
+                  {hasRichTextSelection ? 'Cor, tamanho e formatação serão aplicados somente ao trecho selecionado.' : 'Selecione um trecho no editor para aplicar formatação somente a ele.'}
+                </p>
+              </div>
+
               {/* Color Customization */}
               {selectedBlock.type !== 'divider' && (
                 <div className="space-y-2.5">
@@ -728,18 +781,8 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                           selectedBlock.textColor ||
                           '#1e293b'
                         }
-                        onChange={(e) => {
-                          const val = e.target.value;
-                          if (selectedBlock.type === 'header' || selectedBlock.type === 'header_text') {
-                            updateSelectedBlock({ headerTextColor: val });
-                          } else if (selectedBlock.type === 'button') {
-                            updateSelectedBlock({ buttonTextColor: val });
-                          } else if (selectedBlock.type === 'footer') {
-                            updateSelectedBlock({ footerTextColor: val });
-                          } else {
-                            updateSelectedBlock({ textColor: val });
-                          }
-                        }}
+                        onMouseDown={() => activeEditorRef.current?.saveSelection()}
+                        onChange={(e) => applyTextColor(e.target.value)}
                         className="w-6 h-6 rounded cursor-pointer border border-slate-300 p-0"
                       />
                       <span className="font-mono text-[11px] text-slate-500 uppercase">
@@ -758,17 +801,8 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                       <button
                         key={color}
                         type="button"
-                        onClick={() => {
-                          if (selectedBlock.type === 'header' || selectedBlock.type === 'header_text') {
-                            updateSelectedBlock({ headerTextColor: color });
-                          } else if (selectedBlock.type === 'button') {
-                            updateSelectedBlock({ buttonTextColor: color });
-                          } else if (selectedBlock.type === 'footer') {
-                            updateSelectedBlock({ footerTextColor: color });
-                          } else {
-                            updateSelectedBlock({ textColor: color });
-                          }
-                        }}
+                        onMouseDown={() => activeEditorRef.current?.saveSelection()}
+                        onClick={() => applyTextColor(color)}
                         className="w-5 h-5 rounded-md border border-slate-300 hover:scale-110 transition-transform cursor-pointer shadow-2xs"
                         style={{ backgroundColor: color }}
                         title={color}
@@ -872,7 +906,8 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                       min={10}
                       max={48}
                       value={selectedBlock.fontSizePx || 16}
-                      onChange={(e) => updateSelectedBlock({ fontSizePx: Number(e.target.value) })}
+                      onMouseDown={() => activeEditorRef.current?.saveSelection()}
+                      onChange={(e) => applyFontSize(Number(e.target.value))}
                       className="flex-grow accent-indigo-600 cursor-pointer"
                     />
                     <input
@@ -880,7 +915,8 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                       min={10}
                       max={48}
                       value={selectedBlock.fontSizePx || 16}
-                      onChange={(e) => updateSelectedBlock({ fontSizePx: Number(e.target.value) })}
+                      onMouseDown={() => activeEditorRef.current?.saveSelection()}
+                      onChange={(e) => applyFontSize(Number(e.target.value))}
                       className="w-14 p-1 rounded-md border border-slate-300 text-center font-mono text-xs"
                     />
                   </div>
@@ -923,7 +959,7 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                   <div className="grid grid-cols-4 gap-1.5">
                     <button
                       type="button"
-                      onMouseDown={(e) => e.preventDefault()}
+                      onMouseDown={(e) => { e.preventDefault(); activeEditorRef.current?.saveSelection(); }}
                       onClick={() => applyFormattingToSelection('bold')}
                       className={`p-1.5 rounded-lg border text-xs font-bold flex items-center justify-center gap-1 transition-all cursor-pointer ${
                         selectedBlock.isBold
@@ -938,7 +974,7 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
 
                     <button
                       type="button"
-                      onMouseDown={(e) => e.preventDefault()}
+                      onMouseDown={(e) => { e.preventDefault(); activeEditorRef.current?.saveSelection(); }}
                       onClick={() => applyFormattingToSelection('italic')}
                       className={`p-1.5 rounded-lg border text-xs font-medium italic flex items-center justify-center gap-1 transition-all cursor-pointer ${
                         selectedBlock.isItalic
@@ -953,7 +989,7 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
 
                     <button
                       type="button"
-                      onMouseDown={(e) => e.preventDefault()}
+                      onMouseDown={(e) => { e.preventDefault(); activeEditorRef.current?.saveSelection(); }}
                       onClick={() => applyFormattingToSelection('underline')}
                       className={`p-1.5 rounded-lg border text-xs underline flex items-center justify-center gap-1 transition-all cursor-pointer ${
                         selectedBlock.isUnderline
@@ -968,7 +1004,7 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
 
                     <button
                       type="button"
-                      onMouseDown={(e) => e.preventDefault()}
+                      onMouseDown={(e) => { e.preventDefault(); activeEditorRef.current?.saveSelection(); }}
                       onClick={() => applyFormattingToSelection('strikethrough')}
                       className={`p-1.5 rounded-lg border text-xs line-through flex items-center justify-center gap-1 transition-all cursor-pointer ${
                         selectedBlock.isStrikethrough
@@ -990,7 +1026,8 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                   <label className="font-bold text-slate-700 block">Fonte Segura para E-mail:</label>
                   <select
                     value={selectedBlock.fontFamily || 'Helvetica, Arial, sans-serif'}
-                    onChange={(e) => updateSelectedBlock({ fontFamily: e.target.value })}
+                    onMouseDown={() => activeEditorRef.current?.saveSelection()}
+                    onChange={(e) => applyFontFamily(e.target.value)}
                     className="w-full p-2 rounded-lg border border-slate-300 text-xs bg-white focus:ring-2 focus:ring-indigo-500/20"
                   >
                     {FONT_FAMILIES.map((f) => (

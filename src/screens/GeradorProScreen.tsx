@@ -20,6 +20,7 @@ import { DEFAULT_BLOCKS } from '../data/defaultBlocks';
 import { useEditorHistory } from '../hooks/useEditorHistory';
 import { useDraftAutosave } from '../hooks/useDraftAutosave';
 import { Toast } from '../components/ui/Toast';
+import { BlockSelectorModal } from '../components/gerador/BlockSelectorModal';
 import { sanitizeBlockPropertyUpdate } from '../data/blockProperties';
 import {
   listSavedTemplates,
@@ -56,6 +57,7 @@ export const GeradorProScreen: React.FC<GeradorProScreenProps> = ({
   });
   const [savedTemplates, setSavedTemplates] = useState<TemplateDocument[]>(() => listSavedTemplates());
   const [isTemplateManagerOpen, setIsTemplateManagerOpen] = useState(false);
+  const [isMobileBlockSelectorOpen, setIsMobileBlockSelectorOpen] = useState(false);
 
   const [selectedBlockId, setSelectedBlockId] = useState<string | null>(() => blocks[0]?.id || null);
   useEffect(() => {
@@ -123,9 +125,11 @@ export const GeradorProScreen: React.FC<GeradorProScreenProps> = ({
     end: number;
     selectedText: string;
   } | null>(null);
+  const [hasRichTextSelection, setHasRichTextSelection] = useState(false);
 
   useEffect(() => {
     setActiveSelection(null);
+    setHasRichTextSelection(false);
   }, [selectedBlockId]);
 
   // Viewport Device and UI State
@@ -483,7 +487,18 @@ export const GeradorProScreen: React.FC<GeradorProScreenProps> = ({
       block.id === targetId ? { ...block, ...safeProps } : block,
     );
     setBlocks(nextBlocks);
-    pushToHistory(nextBlocks);
+    const coalescibleFields = new Set([
+      'text',
+      'headerTitle',
+      'headerSubtitle',
+      'footerText',
+      'buttonLabel',
+      'buttonUrl',
+      'couponCode',
+      'couponDiscount',
+    ]);
+    const shouldCoalesce = Object.keys(safeProps).some((key) => coalescibleFields.has(key));
+    pushToHistory(nextBlocks, shouldCoalesce ? { coalesce: true } : undefined);
   };
 
   const handleSelectTemplate = (template: EmailTemplate) => {
@@ -716,59 +731,84 @@ export const GeradorProScreen: React.FC<GeradorProScreenProps> = ({
   };
 
   const applyFormattingToSelection = (
-    formatType: 'bold' | 'italic' | 'underline' | 'strikethrough' | 'color' | 'fontSize' | 'clear' | 'variable' | 'link' | 'unlink',
+    formatType: 'bold' | 'italic' | 'underline' | 'strikethrough' | 'color' | 'fontSize' | 'fontFamily' | 'clear' | 'variable' | 'link' | 'unlink',
     formatValue?: string | number,
     colorTargetKey?: 'textColor' | 'headerTextColor' | 'buttonTextColor' | 'footerTextColor'
   ) => {
     const selected = blocks.find((b) => b.id === selectedBlockId);
     if (!selected) return;
 
-    if (formatType === 'color' && formatValue) {
+    const editor = activeEditorRef.current;
+    const hasInlineSelection = Boolean(editor?.hasSavedSelection());
+
+    if (editor && hasInlineSelection) {
+      editor.restoreSelection();
+    }
+
+    if (formatType === 'color' && formatValue && !hasInlineSelection) {
       const colorVal = String(formatValue);
       const targetField = colorTargetKey || (
         (selected.type === 'header' || selected.type === 'header_text') ? 'headerTextColor' :
         selected.type === 'footer' ? 'footerTextColor' :
         selected.type === 'button' ? 'buttonTextColor' : 'textColor'
       );
-      updateSelectedBlock({ [targetField]: colorVal, textColor: colorVal });
+      updateSelectedBlock({ [targetField]: colorVal });
+      return;
     }
 
-    if (activeEditorRef.current) {
+    const editorCanApplyInline = Boolean(
+      editor && (
+        hasInlineSelection ||
+        formatType === 'variable' ||
+        formatType === 'link' ||
+        formatType === 'unlink'
+      )
+    );
+
+    if (editorCanApplyInline && editor) {
       switch (formatType) {
         case 'bold':
-          activeEditorRef.current.execCommand('bold');
+          editor.execCommand('bold');
           break;
         case 'italic':
-          activeEditorRef.current.execCommand('italic');
+          editor.execCommand('italic');
           break;
         case 'underline':
-          activeEditorRef.current.execCommand('underline');
+          editor.execCommand('underline');
           break;
         case 'strikethrough':
-          activeEditorRef.current.execCommand('strikeThrough');
+          editor.execCommand('strikeThrough');
           break;
         case 'color':
-          if (formatValue) activeEditorRef.current.execCommand('foreColor', String(formatValue));
+          if (formatValue) editor.applyInlineStyle('color', String(formatValue));
+          break;
+        case 'fontSize':
+          if (formatValue) editor.applyInlineStyle('font-size', `${Number(formatValue)}px`);
+          break;
+        case 'fontFamily':
+          if (formatValue) editor.applyInlineStyle('font-family', String(formatValue));
           break;
         case 'clear':
-          activeEditorRef.current.execCommand('removeFormat');
+          editor.execCommand('removeFormat');
           break;
         case 'variable':
-          if (formatValue) activeEditorRef.current.insertHtml(` ${formatValue} `);
+          if (formatValue) editor.insertHtml(` ${formatValue} `);
           break;
         case 'link':
           handleOpenLinkModal();
           return;
         case 'unlink':
-          activeEditorRef.current.execCommand('unlink');
+          editor.execCommand('unlink');
           break;
       }
       showToast('Formatação aplicada no editor de texto!');
     } else {
-      if (formatType === 'bold') updateSelectedBlock({ isBold: !selected.isBold });
-      else if (formatType === 'italic') updateSelectedBlock({ isItalic: !selected.isItalic });
-      else if (formatType === 'underline') updateSelectedBlock({ isUnderline: !selected.isUnderline });
-      else if (formatType === 'strikethrough') updateSelectedBlock({ isStrikethrough: !selected.isStrikethrough });
+      if (formatType === 'bold' && !hasInlineSelection) updateSelectedBlock({ isBold: !selected.isBold });
+      else if (formatType === 'italic' && !hasInlineSelection) updateSelectedBlock({ isItalic: !selected.isItalic });
+      else if (formatType === 'underline' && !hasInlineSelection) updateSelectedBlock({ isUnderline: !selected.isUnderline });
+      else if (formatType === 'strikethrough' && !hasInlineSelection) updateSelectedBlock({ isStrikethrough: !selected.isStrikethrough });
+      else if (formatType === 'fontSize' && formatValue && !hasInlineSelection) updateSelectedBlock({ fontSizePx: Number(formatValue) });
+      else if (formatType === 'fontFamily' && formatValue && !hasInlineSelection) updateSelectedBlock({ fontFamily: String(formatValue) });
       else if (formatType === 'variable' && formatValue) {
         const defaultField = (
           (selected.type === 'header' || selected.type === 'header_text') ? 'headerTitle' :
@@ -797,7 +837,8 @@ export const GeradorProScreen: React.FC<GeradorProScreenProps> = ({
     if (!Object.keys(safeProps).length) return;
     const nextBlocks = blocks.map((block) => block.id === targetId ? { ...block, ...safeProps } : block);
     setBlocks(nextBlocks);
-    pushToHistory(nextBlocks);
+    const shouldCoalesce = ['text', 'headerTitle', 'headerSubtitle', 'footerText', 'buttonLabel', 'couponCode', 'couponDiscount'].includes(String(Object.keys(safeProps)[0] || ''));
+    pushToHistory(nextBlocks, shouldCoalesce ? { coalesce: true } : undefined);
   };
 
   const selectedBlock = blocks.find((b) => b.id === selectedBlockId) || null;
@@ -868,6 +909,7 @@ export const GeradorProScreen: React.FC<GeradorProScreenProps> = ({
             onOpenTemplates={() => {
               // Switches to templates view in sidebar
             }}
+            onOpenBlockSelector={() => setIsMobileBlockSelectorOpen(true)}
           />
         </main>
 
@@ -879,6 +921,7 @@ export const GeradorProScreen: React.FC<GeradorProScreenProps> = ({
             applyFormattingToSelection={applyFormattingToSelection}
             insertVariableToSelectedBlock={insertVariableToSelectedBlock}
             activeSelection={activeSelection}
+            hasRichTextSelection={hasRichTextSelection}
             linkModalOpen={linkModalOpen}
             setLinkModalOpen={setLinkModalOpen}
             linkText={linkText}
@@ -894,6 +937,9 @@ export const GeradorProScreen: React.FC<GeradorProScreenProps> = ({
             handleAddBlock={handleAddBlock}
             handleTextSelectOrChange={handleTextSelectOrChange}
             activeEditorRef={activeEditorRef}
+            onRichTextSelectionChange={(selectedText) => {
+              setHasRichTextSelection(Boolean(selectedText));
+            }}
             imageFileInputRef={imageFileInputRef}
             handleImageBlockUpload={handleImageBlockUpload}
             handleNormalizeExistingImage={handleNormalizeExistingImage}
@@ -904,6 +950,15 @@ export const GeradorProScreen: React.FC<GeradorProScreenProps> = ({
           />
         </aside>
       </div>
+
+      <BlockSelectorModal
+        isOpen={isMobileBlockSelectorOpen}
+        onClose={() => setIsMobileBlockSelectorOpen(false)}
+        onAddBlock={(type) => {
+          handleAddBlock(type);
+          setIsMobileBlockSelectorOpen(false);
+        }}
+      />
 
       {/* Export HTML Modal */}
       <ExportModal
