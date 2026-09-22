@@ -105,7 +105,6 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
           while (target && target !== doc.body) {
             const blockId = target.getAttribute('data-block-id');
             if (blockId) {
-              e.preventDefault();
               e.stopPropagation();
               setSelectedBlockId(blockId);
               return;
@@ -126,7 +125,10 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
           const el = target?.closest('[data-inline-edit]') as HTMLElement | null;
           if (!el || !doc.body.contains(el)) return;
 
-          event.preventDefault();
+          // Não usamos preventDefault aqui: o navegador precisa concluir a
+          // seleção nativa da palavra no duplo clique. Interromper o default
+          // nesse ponto fazia a seleção desaparecer antes de entrarmos no modo
+          // de edição.
           event.stopPropagation();
 
           const blockEl = el.closest('[data-block-id]') as HTMLElement | null;
@@ -140,14 +142,18 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
           el.title = '';
           el.focus();
 
-          // Coloca o cursor no fim do conteúdo sem alterar o HTML existente.
+          // Mantém a seleção de palavra criada pelo duplo clique. O handler
+          // antigo selecionava todo o conteúdo e colapsava no final, fazendo
+          // parecer que o duplo clique não selecionava nada.
           try {
             const selection = doc.getSelection();
-            const range = doc.createRange();
-            range.selectNodeContents(el);
-            range.collapse(false);
-            selection?.removeAllRanges();
-            selection?.addRange(range);
+            if (!selection || selection.rangeCount === 0 || !selection.toString()) {
+              const range = doc.createRange();
+              range.selectNodeContents(el);
+              range.collapse(false);
+              selection?.removeAllRanges();
+              selection?.addRange(range);
+            }
           } catch {
             // Alguns motores podem não permitir a seleção imediatamente após o focus.
           }
