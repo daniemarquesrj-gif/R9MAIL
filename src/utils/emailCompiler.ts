@@ -26,11 +26,14 @@ export function compileBlocksForEmail(blocks: EmailBlock[], data?: EmailData): s
       const src = sanitizeUrl(block.imageUrl, 'src') || '';
       const alt = escapeHtml(block.imageAlt || 'Imagem do e-mail');
       const href = sanitizeUrl(block.imageLink, 'href');
+      const align = ['left', 'center', 'right'].includes(block.alignment || '') ? block.alignment! : 'center';
+      const bg = sanitizeCssValue(block.bgColor || '#ffffff', '#ffffff');
+      const width = Number.isFinite(block.imageWidthPx) ? Math.max(80, Math.min(1200, Number(block.imageWidthPx))) : 600;
       const image = src
-        ? `<img src="${src}" alt="${alt}" width="600" style="display:block;width:100%;max-width:600px;height:auto;border:0;outline:none;text-decoration:none;" />`
+        ? `<img src="${src}" alt="${alt}" width="${width}" style="display:block;width:${width}px;max-width:100%;height:auto;border:0;outline:none;text-decoration:none;margin:${align === 'left' ? '0 auto 0 0' : align === 'right' ? '0 0 0 auto' : '0 auto'};" />`
         : `<div role="img" aria-label="${alt}" style="padding:32px 16px;background:#f1f5f9;color:#64748b;text-align:center;font-family:Helvetica,Arial,sans-serif;font-size:13px;">Imagem não definida</div>`;
       const body = href && src ? `<a href="${href}" target="_blank" style="display:block;text-decoration:none;">${image}</a>` : image;
-      return `<tr><td align="center" style="padding:0;">${body}</td></tr>`;
+      return `<tr><td align="${align}" bgcolor="${bg}" style="padding:0;background-color:${bg};">${body}</td></tr>`;
     }
     const blockHtml = generateSingleBlockHtml(block);
     if (!blockHtml) return '';

@@ -533,7 +533,7 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
               )}
 
               {/* Image / Banner Block */}
-              {selectedBlock.type === 'image' && (
+              {(selectedBlock.type === 'image' || selectedBlock.type === 'header_image') && (
                 <div className="space-y-3">
                   {/* Hidden image input for upload */}
                   <input
@@ -622,6 +622,76 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                       className="w-full p-2 rounded-lg border border-slate-300 text-xs font-mono"
                     />
                   </div>
+
+                  {(selectedBlock.type === 'image' || selectedBlock.type === 'header_image') && (
+                    <div className="pt-2 border-t border-slate-100 space-y-3">
+                      <div>
+                        <label className="font-bold text-slate-700 block mb-1">Largura da imagem (px):</label>
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="number"
+                            min={80}
+                            max={1200}
+                            step={1}
+                            value={selectedBlock.imageWidthPx || 600}
+                            onChange={(e) => updateSelectedBlock({ imageWidthPx: Math.max(80, Math.min(1200, Number(e.target.value) || 600)) })}
+                            className="w-full p-2 rounded-lg border border-slate-300 text-xs font-mono"
+                          />
+                          <span className="text-[10px] text-slate-400 shrink-0">máx. 1200</span>
+                        </div>
+                        <p className="text-[10px] text-slate-400 mt-1">A imagem mantém a proporção e se adapta ao espaço disponível no e-mail.</p>
+                      </div>
+
+                      <div>
+                        <label className="font-bold text-slate-700 block mb-1">Alinhamento:</label>
+                        <div className="grid grid-cols-3 gap-1.5">
+                          {[
+                            { value: 'left', label: 'Esquerda', Icon: AlignLeft },
+                            { value: 'center', label: 'Centro', Icon: AlignCenter },
+                            { value: 'right', label: 'Direita', Icon: AlignRight },
+                          ].map(({ value, label, Icon }) => (
+                            <button
+                              key={value}
+                              type="button"
+                              onClick={() => updateSelectedBlock({ alignment: value as EmailBlock['alignment'] })}
+                              className={`py-2 rounded-lg border text-[10px] font-semibold flex flex-col items-center gap-1 transition-colors cursor-pointer ${selectedBlock.alignment === value ? 'border-indigo-500 bg-indigo-50 text-indigo-700' : 'border-slate-200 bg-white text-slate-500 hover:bg-slate-50'}`}
+                            >
+                              <Icon className="w-3.5 h-3.5" />
+                              {label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div>
+                        <div className="flex items-center justify-between">
+                          <label className="font-bold text-slate-700">Cor de fundo do bloco:</label>
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="color"
+                              value={selectedBlock.bgColor || '#ffffff'}
+                              onChange={(e) => updateSelectedBlock({ bgColor: e.target.value })}
+                              className="w-7 h-7 rounded cursor-pointer border border-slate-300 p-0"
+                            />
+                            <span className="font-mono text-[10px] text-slate-500 uppercase">{selectedBlock.bgColor || '#ffffff'}</span>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-1.5 flex-wrap mt-2">
+                          {COLOR_PRESETS.map((color) => (
+                            <button
+                              key={color}
+                              type="button"
+                              onClick={() => updateSelectedBlock({ bgColor: color })}
+                              className="w-5 h-5 rounded-md border border-slate-300 hover:scale-110 transition-transform cursor-pointer shadow-2xs"
+                              style={{ backgroundColor: color }}
+                              title={color}
+                            />
+                          ))}
+                        </div>
+                        <p className="text-[10px] text-slate-400 mt-1">A cor aparece no espaço ao redor da imagem quando ela não ocupa toda a largura do bloco.</p>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -891,7 +961,7 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
               )}
 
               {/* Typography Size Slider & Number Input */}
-              {selectedBlock.type !== 'divider' && selectedBlock.type !== 'image' && selectedBlock.type !== 'social' && (
+              {selectedBlock.type !== 'divider' && selectedBlock.type !== 'image' && selectedBlock.type !== 'header_image' && selectedBlock.type !== 'social' && (
                 <div className="space-y-2 pt-2 border-t border-slate-100">
                   <div className="flex items-center justify-between">
                     <label className="font-bold text-slate-700">Tamanho da Fonte:</label>

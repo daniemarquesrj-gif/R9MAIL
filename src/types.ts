@@ -57,6 +57,8 @@ export interface EmailBlock {
   imageAlt?: string;
   imageLink?: string;
   imageCaption?: string;
+  /** Largura visual do cabeçalho de imagem em pixels; limitado pelo container. */
+  imageWidthPx?: number;
 
   // Coupon properties
   couponCode?: string;

@@ -104,17 +104,20 @@ export function generateSingleBlockHtml(block: EmailBlock): string {
       const alt = safeAttr(block.imageAlt || 'Cabeçalho do E-mail');
       const link = sanitizeUrl(block.imageLink, 'href');
       const caption = block.imageCaption ? safeRich(block.imageCaption) : '';
-      const bgStyle = block.bgColor ? `background-color: ${safeCss(block.bgColor)};` : '';
+      const bg = safeCss(block.bgColor || '#ffffff', '#ffffff');
+      const align = ['left', 'center', 'right'].includes(block.alignment || '') ? block.alignment! : 'center';
+      const width = Number.isFinite(block.imageWidthPx) ? Math.max(80, Math.min(1200, Number(block.imageWidthPx))) : 600;
+      const margin = align === 'left' ? '0 auto 0 0' : align === 'right' ? '0 0 0 auto' : '0 auto';
 
       let imgHtml = imgUrl
-        ? `<img src="${imgUrl}" alt="${alt}" class="email-header-img" width="100%" style="width: 100% !important; max-width: 100% !important; height: auto !important; display: block; border: 0; outline: none; margin: 0 auto; object-fit: cover;" />`
-        : `<div role="img" aria-label="${alt}" style="padding:32px 16px;background:#f1f5f9;color:#64748b;text-align:center;font-family:Helvetica,Arial,sans-serif;font-size:13px;">Adicione uma imagem</div>`;
+        ? `<img src="${imgUrl}" alt="${alt}" class="email-header-img" width="${width}" style="display: block; width: ${width}px; max-width: 100% !important; height: auto !important; border: 0; outline: none; text-decoration: none; margin: ${margin};" />`
+        : `<div role="img" aria-label="${alt}" style="padding:32px 16px;background:#f1f5f9;color:#64748b;text-align:center;font-family:Helvetica,Arial,sans-serif;font-size:13px;max-width:${width}px;margin:${margin};box-sizing:border-box;">Adicione uma imagem</div>`;
       if (link) {
         imgHtml = `<a href="${link}" target="_blank" style="text-decoration: none; display: block; width: 100%;">${imgHtml}</a>`;
       }
 
       return `
-    <div ${blockIdAttr} class="header-img-container" style="padding: 0; width: 100%; text-align: center; font-family: Helvetica, Arial, sans-serif; box-sizing: border-box; overflow: hidden; ${bgStyle}">
+    <div ${blockIdAttr} class="header-img-container" style="padding: 0; width: 100%; text-align: ${align}; font-family: Helvetica, Arial, sans-serif; box-sizing: border-box; overflow: hidden; background-color: ${bg};">
       ${imgHtml}
       ${caption ? `<p style="margin: 8px 0 0 0; font-size: 11px; color: #64748b; font-style: italic; padding: 0 16px;">${caption}</p>` : ''}
     </div>`;
@@ -186,19 +189,22 @@ export function generateSingleBlockHtml(block: EmailBlock): string {
       const alt = safeAttr(block.imageAlt || 'Banner Promocional');
       const link = sanitizeUrl(block.imageLink, 'href');
       const caption = block.imageCaption ? safeRich(block.imageCaption) : '';
-      const bgStyle = block.bgColor ? `background-color: ${safeCss(block.bgColor)};` : '';
+      const bg = safeCss(block.bgColor || '#ffffff', '#ffffff');
+      const align = ['left', 'center', 'right'].includes(block.alignment || '') ? block.alignment! : 'center';
+      const width = Number.isFinite(block.imageWidthPx) ? Math.max(80, Math.min(1200, Number(block.imageWidthPx))) : 600;
+      const margin = align === 'left' ? '0 auto 0 0' : align === 'right' ? '0 0 0 auto' : '0 auto';
 
       let imgHtml = imgUrl
-        ? `<img src="${imgUrl}" alt="${alt}" class="email-banner-img" width="100%" style="width: 100% !important; max-width: 100% !important; height: auto !important; display: block; border: 0; outline: none; margin: 0 auto; border-radius: 6px; object-fit: contain;" />`
-        : `<div role="img" aria-label="${alt}" style="padding:32px 16px;background:#f1f5f9;color:#64748b;text-align:center;font-family:Helvetica,Arial,sans-serif;font-size:13px;">Adicione uma imagem</div>`;
+        ? `<img src="${imgUrl}" alt="${alt}" class="email-banner-img" width="${width}" style="display:block; width:${width}px; max-width:100% !important; height:auto !important; border:0; outline:none; text-decoration:none; margin:${margin}; border-radius:6px; object-fit:contain;" />`
+        : `<div role="img" aria-label="${alt}" style="padding:32px 16px;background:#f1f5f9;color:#64748b;text-align:center;font-family:Helvetica,Arial,sans-serif;font-size:13px;max-width:${width}px;margin:${margin};box-sizing:border-box;">Adicione uma imagem</div>`;
       if (link && imgUrl) {
-        imgHtml = `<a href="${link}" target="_blank" style="text-decoration: none; display: block; width: 100%;">${imgHtml}</a>`;
+        imgHtml = `<a href="${link}" style="text-decoration:none; display:block; width:100%;">${imgHtml}</a>`;
       }
 
       return `
-    <div ${blockIdAttr} class="img-container" style="padding: 16px 28px; text-align: center; font-family: Helvetica, Arial, sans-serif; box-sizing: border-box; width: 100%; ${bgStyle}">
+    <div ${blockIdAttr} class="img-container" style="padding:0; text-align:${align}; font-family:Helvetica,Arial,sans-serif; box-sizing:border-box; width:100%; overflow:hidden; background-color:${bg};">
       ${imgHtml}
-      ${caption ? `<p style="margin: 8px 0 0 0; font-size: 12px; color: #64748b; font-style: italic;">${caption}</p>` : ''}
+      ${caption ? `<p style="margin:8px 0 0 0; font-size:12px; color:#64748b; font-style:italic; padding:0 16px;">${caption}</p>` : ''}
     </div>`;
     }
 

@@ -22,6 +22,7 @@ interface PreviewCanvasProps {
   selectedBlockId: string | null;
   setSelectedBlockId: (id: string | null) => void;
   onInlineBlockEdit: (blockId: string, field: keyof EmailBlock, value: string) => void;
+  onInlineBlockDraft: (blockId: string, field: keyof EmailBlock, value: string) => void;
   previewDevice: 'desktop' | 'mobile';
   setPreviewDevice: (device: 'desktop' | 'mobile') => void;
   iframeHeight: number;
@@ -43,6 +44,7 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
   selectedBlockId,
   setSelectedBlockId,
   onInlineBlockEdit,
+  onInlineBlockDraft,
   previewDevice,
   setPreviewDevice,
   iframeHeight,
@@ -65,48 +67,10 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
   const workspaceRef = useRef<HTMLDivElement | null>(null);
   const floatingToolbarRef = useRef<HTMLDivElement | null>(null);
   const inlineSelectionRef = useRef<{ range: Range; blockId: string; field: keyof EmailBlock; element: HTMLElement } | null>(null);
-  const inlineEditTimersRef = useRef<Map<string, number>>(new Map());
-  const pendingInlineEditsRef = useRef<Map<string, { blockId: string; field: keyof EmailBlock; element: HTMLElement }>>(new Map());
-
   const readInlineEditValue = (element: HTMLElement, field: keyof EmailBlock): string => {
     return field === 'text' || field === 'headerTitle' || field === 'headerSubtitle'
       ? element.innerHTML
       : element.textContent || '';
-  };
-
-  const flushInlineEdit = (key: string) => {
-    const timer = inlineEditTimersRef.current.get(key);
-    if (timer !== undefined) {
-      window.clearTimeout(timer);
-      inlineEditTimersRef.current.delete(key);
-    }
-
-    const pending = pendingInlineEditsRef.current.get(key);
-    if (!pending) return;
-
-    const value = readInlineEditValue(pending.element, pending.field);
-    onInlineBlockEdit(pending.blockId, pending.field, value);
-    pendingInlineEditsRef.current.delete(key);
-  };
-
-  const scheduleInlineEdit = (element: HTMLElement) => {
-    const blockEl = element.closest('[data-block-id]') as HTMLElement | null;
-    const blockId = blockEl?.getAttribute('data-block-id');
-    const field = element.getAttribute('data-inline-edit') as keyof EmailBlock | null;
-    if (!blockId || !field || element.dataset.r9Editing !== 'true') return;
-
-    const key = `${blockId}:${String(field)}`;
-    pendingInlineEditsRef.current.set(key, { blockId, field, element });
-
-    const previousTimer = inlineEditTimersRef.current.get(key);
-    if (previousTimer !== undefined) window.clearTimeout(previousTimer);
-
-    const timer = window.setTimeout(() => flushInlineEdit(key), 350);
-    inlineEditTimersRef.current.set(key, timer);
-  };
-
-  const flushAllInlineEdits = () => {
-    Array.from(pendingInlineEditsRef.current.keys()).forEach(flushInlineEdit);
   };
 
   const selectedIndex = blocks.findIndex((b) => b.id === selectedBlockId);
@@ -269,16 +233,21 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
         };
         doc.addEventListener('selectionchange', updateInlineFormatToolbar);
 
-        // focusout borbulha no DOM, portanto funciona como um blur delegado.
-        // Isso também continua funcionando quando o elemento editável é
-        // reconstruído durante um re-render.
-        // Mantém o estado React sincronizado durante a digitação, mas com debounce.
-        // Assim o painel de propriedades acompanha o que está sendo digitado sem
-        // reconstruir o iframe a cada tecla e destruir o caret/seleção.
+        // Durante a edição, o DOM do iframe é a fonte de verdade do campo.
+        // Atualizamos somente o draft do painel a cada input. NÃO alteramos
+        // `blocks` aqui: fazer isso reconstruiria/substituiria o elemento
+        // contenteditable e faria o caret desaparecer durante a digitação.
         doc.body.oninput = (event: Event) => {
           const target = event.target as HTMLElement | null;
           if (!target || target.dataset.r9Editing !== 'true') return;
-          scheduleInlineEdit(target);
+
+          const blockEl = target.closest('[data-block-id]') as HTMLElement | null;
+          const blockId = blockEl?.getAttribute('data-block-id');
+          const field = target.getAttribute('data-inline-edit') as keyof EmailBlock | null;
+          if (!blockId || !field) return;
+
+          const value = readInlineEditValue(target, field);
+          onInlineBlockDraft(blockId, field, value);
         };
 
         doc.body.onfocusout = (event: FocusEvent) => {
@@ -290,12 +259,10 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
           const field = target.getAttribute('data-inline-edit') as keyof EmailBlock | null;
           if (!blockId || !field) return;
 
-          // Antes de sair do canvas, força a última alteração pendente para o
-          // estado do editor. Isso evita que clicar no painel de propriedades
-          // faça o texto recém-digitado voltar ao valor antigo.
-          const key = `${blockId}:${String(field)}`;
-          pendingInlineEditsRef.current.set(key, { blockId, field, element: target });
-          flushInlineEdit(key);
+          // Commit somente quando a edição termina. Durante a digitação não
+          // alteramos `blocks`, portanto o iframe e o caret permanecem intactos.
+          const value = readInlineEditValue(target, field);
+          onInlineBlockEdit(blockId, field, value);
 
           target.contentEditable = 'false';
           delete target.dataset.r9Editing;
@@ -443,15 +410,6 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
       window.removeEventListener('resize', update);
     };
   }, [selectedBlockId, compiledHtml, previewDevice, zoomLevel, iframeHeight]);
-
-  useEffect(() => {
-    return () => {
-      flushAllInlineEdits();
-      inlineEditTimersRef.current.forEach((timer) => window.clearTimeout(timer));
-      inlineEditTimersRef.current.clear();
-      pendingInlineEditsRef.current.clear();
-    };
-  }, []);
 
   // Handle drop from sidebar
   const handleDropOnCanvas = (e: React.DragEvent) => {

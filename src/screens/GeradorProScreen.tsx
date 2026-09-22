@@ -186,6 +186,13 @@ export const GeradorProScreen: React.FC<GeradorProScreenProps> = ({
         blocks.forEach((block) => {
           const blockEl = doc.querySelector(`[data-block-id="${block.id}"]`) as HTMLElement | null;
           if (blockEl) {
+            // Nunca substitua um elemento enquanto ele estiver sendo editado
+            // diretamente no canvas. O DOM do contenteditable é a fonte de
+            // verdade durante a digitação; substituir o nó destrói o caret,
+            // quebra espaço/Enter e faz teclas repetidas parecerem travadas.
+            const activeInlineEditor = blockEl.querySelector('[data-inline-edit][contenteditable="true"][data-r9-editing="true"]');
+            if (activeInlineEditor) return;
+
             const tempDiv = doc.createElement('div');
             tempDiv.innerHTML = generateSingleBlockHtml(block).trim();
             const newBlockEl = tempDiv.firstElementChild;
@@ -369,6 +376,20 @@ export const GeradorProScreen: React.FC<GeradorProScreenProps> = ({
           imageUrl: '',
           imageAlt: 'Imagem Ilustrativa',
           imageCaption: '',
+          imageWidthPx: 600,
+          alignment: 'center',
+          bgColor: '#ffffff',
+        };
+        break;
+      case 'header_image':
+        newBlock = {
+          ...newBlock,
+          imageUrl: '',
+          imageAlt: 'Imagem de Cabeçalho',
+          imageCaption: '',
+          imageWidthPx: 600,
+          alignment: 'center',
+          bgColor: '#ffffff',
         };
         break;
       case 'coupon':

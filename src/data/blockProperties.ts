@@ -37,6 +37,7 @@ export const BLOCK_PROPERTY_DEFINITIONS: readonly BlockPropertyDefinition[] = [
   { key: 'imageAlt', label: 'Texto alternativo', kind: 'text', section: 'content', blockTypes: ['image', 'header_image'] },
   { key: 'imageLink', label: 'Link da imagem', kind: 'url', section: 'content', blockTypes: ['image', 'header_image'] },
   { key: 'imageCaption', label: 'Legenda', kind: 'text', section: 'content', blockTypes: ['image', 'header_image'] },
+  { key: 'imageWidthPx', label: 'Largura da imagem (px)', kind: 'number', section: 'layout', blockTypes: ['image', 'header_image'], min: 80, max: 1200, step: 1 },
   { key: 'couponCode', label: 'Código do cupom', kind: 'text', section: 'content', blockTypes: ['coupon'] },
   { key: 'couponDiscount', label: 'Desconto', kind: 'text', section: 'content', blockTypes: ['coupon'] },
   { key: 'couponTitle', label: 'Título do cupom', kind: 'text', section: 'content', blockTypes: ['coupon'] },
@@ -56,7 +57,7 @@ export const BLOCK_PROPERTY_DEFINITIONS: readonly BlockPropertyDefinition[] = [
   { key: 'isUnderline', label: 'Sublinhado', kind: 'boolean', section: 'typography', blockTypes: TYPOGRAPHY_BLOCKS },
   { key: 'isStrikethrough', label: 'Tachado', kind: 'boolean', section: 'typography', blockTypes: TYPOGRAPHY_BLOCKS },
   { key: 'textColor', label: 'Cor do texto', kind: 'color', section: 'appearance', blockTypes: ['title', 'subtitle', 'text'] },
-  { key: 'bgColor', label: 'Cor de fundo', kind: 'color', section: 'appearance', blockTypes: TEXT_BLOCKS },
+  { key: 'bgColor', label: 'Cor de fundo', kind: 'color', section: 'appearance', blockTypes: [...TEXT_BLOCKS, 'image', 'header_image'] },
   { key: 'buttonBgColor', label: 'Cor do botão', kind: 'color', section: 'appearance', blockTypes: ['button'] },
   { key: 'buttonTextColor', label: 'Cor do texto do botão', kind: 'color', section: 'appearance', blockTypes: ['button'] },
   { key: 'buttonWidth', label: 'Largura do botão', kind: 'select', section: 'layout', blockTypes: ['button'], options: [
@@ -116,9 +117,13 @@ export function sanitizeBlockPropertyUpdate(updatedProps: Partial<Omit<EmailBloc
       continue;
     }
 
-    if (key === 'fontSizePx' || key === 'dividerHeight' || key === 'headerSubtitleSizePx') {
+    if (key === 'fontSizePx' || key === 'dividerHeight' || key === 'headerSubtitleSizePx' || key === 'imageWidthPx') {
       const value = Number(rawValue);
-      if (Number.isFinite(value)) (result as Record<string, unknown>)[key] = Math.max(1, Math.min(key === 'fontSizePx' ? 72 : 20, value));
+      if (Number.isFinite(value)) {
+        const max = key === 'fontSizePx' ? 72 : key === 'imageWidthPx' ? 1200 : 20;
+        const min = key === 'imageWidthPx' ? 80 : 1;
+        (result as Record<string, unknown>)[key] = Math.max(min, Math.min(max, value));
+      }
       continue;
     }
 

@@ -976,6 +976,12 @@ export function parseHtmlToBlocks(html?: string | null): EmailBlock[] {
         const caption = img.nextElementSibling?.tagName.toLowerCase() === 'p' ? getTextWithLineBreaks(img.nextElementSibling) : undefined;
 
         if (src) {
+          const imageStyles = parseStylesAndAttrs(img);
+          const widthRaw = img.getAttribute('width') || imageStyles['width'] || '';
+          const widthMatch = widthRaw.match(/([0-9]+(?:\.[0-9]+)?)/);
+          const imageWidthPx = widthMatch ? Math.max(80, Math.min(1200, Number(widthMatch[1]))) : 600;
+          const containerAlign = ['left', 'center', 'right'].includes(alignment) ? alignment : 'center';
+
           blocks.push({
             id: createId(),
             type: 'header_image',
@@ -983,6 +989,8 @@ export function parseHtmlToBlocks(html?: string | null): EmailBlock[] {
             imageAlt: alt,
             imageLink: parentAnchor?.getAttribute('href') || undefined,
             imageCaption: caption,
+            imageWidthPx,
+            alignment: containerAlign,
             bgColor: bgColor,
           });
           markAllVisited(node);
