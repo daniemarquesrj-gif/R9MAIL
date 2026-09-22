@@ -126,6 +126,7 @@ export const GeradorProScreen: React.FC<GeradorProScreenProps> = ({
     selectedText: string;
   } | null>(null);
   const [hasRichTextSelection, setHasRichTextSelection] = useState(false);
+  const [inlineBlockDrafts, setInlineBlockDrafts] = useState<Record<string, Partial<EmailBlock>>>({});
 
   useEffect(() => {
     setActiveSelection(null);
@@ -825,11 +826,27 @@ export const GeradorProScreen: React.FC<GeradorProScreenProps> = ({
     applyFormattingToSelection('variable', varName);
   };
 
+  const handleInlineBlockDraft = useCallback((blockId: string, field: keyof EmailBlock, value: string) => {
+    setInlineBlockDrafts((prev) => ({
+      ...prev,
+      [blockId]: { ...(prev[blockId] || {}), [field]: value },
+    }));
+  }, []);
+
   const handleInlineBlockEdit = useCallback((blockId: string, field: keyof EmailBlock, value: string) => {
     const target = blocks.find((block) => block.id === blockId);
     if (!target) return;
     setSelectedBlockId(blockId);
     updateSelectedBlockForId(blockId, { [field]: value });
+    setInlineBlockDrafts((prev) => {
+      if (!prev[blockId]) return prev;
+      const next = { ...prev };
+      const blockDraft = { ...next[blockId] };
+      delete blockDraft[field];
+      if (Object.keys(blockDraft).length) next[blockId] = blockDraft;
+      else delete next[blockId];
+      return next;
+    });
   }, [blocks]);
 
   const updateSelectedBlockForId = (targetId: string, updatedProps: Partial<EmailBlock>) => {
@@ -837,11 +854,23 @@ export const GeradorProScreen: React.FC<GeradorProScreenProps> = ({
     if (!Object.keys(safeProps).length) return;
     const nextBlocks = blocks.map((block) => block.id === targetId ? { ...block, ...safeProps } : block);
     setBlocks(nextBlocks);
+    setInlineBlockDrafts((prev) => {
+      if (!prev[targetId]) return prev;
+      const next = { ...prev };
+      const draft = { ...next[targetId] };
+      Object.keys(safeProps).forEach((key) => delete draft[key as keyof EmailBlock]);
+      if (Object.keys(draft).length) next[targetId] = draft;
+      else delete next[targetId];
+      return next;
+    });
     const shouldCoalesce = ['text', 'headerTitle', 'headerSubtitle', 'footerText', 'buttonLabel', 'couponCode', 'couponDiscount'].includes(String(Object.keys(safeProps)[0] || ''));
     pushToHistory(nextBlocks, shouldCoalesce ? { coalesce: true } : undefined);
   };
 
   const selectedBlock = blocks.find((b) => b.id === selectedBlockId) || null;
+  const selectedBlockForPanel = selectedBlock
+    ? { ...selectedBlock, ...(inlineBlockDrafts[selectedBlock.id] || {}) }
+    : null;
 
   return (
     <>
@@ -895,6 +924,7 @@ export const GeradorProScreen: React.FC<GeradorProScreenProps> = ({
             selectedBlockId={selectedBlockId}
             setSelectedBlockId={setSelectedBlockId}
             onInlineBlockEdit={handleInlineBlockEdit}
+            onInlineBlockDraft={handleInlineBlockDraft}
             previewDevice={previewDevice}
             setPreviewDevice={setPreviewDevice}
             iframeHeight={iframeHeight}
@@ -916,7 +946,7 @@ export const GeradorProScreen: React.FC<GeradorProScreenProps> = ({
         {/* Panel C: Right Sidebar (Properties Panel with Collapsible Accordion) */}
         <aside className="w-80 lg:w-88 shrink-0 h-full overflow-hidden hidden lg:flex flex-col z-10 shadow-xs">
           <PropertiesPanel
-            selectedBlock={selectedBlock}
+            selectedBlock={selectedBlockForPanel}
             updateSelectedBlock={updateSelectedBlock}
             applyFormattingToSelection={applyFormattingToSelection}
             insertVariableToSelectedBlock={insertVariableToSelectedBlock}
