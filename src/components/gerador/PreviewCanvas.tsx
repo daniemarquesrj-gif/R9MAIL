@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { EmailBlock, BlockType } from '../../types';
 import {
   Monitor,
@@ -57,6 +57,12 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
 }) => {
   const [zoomLevel, setZoomLevel] = useState<number>(100);
   const [isDragOver, setIsDragOver] = useState<boolean>(false);
+  const [toolbarPosition, setToolbarPosition] = useState<{ top: number; left: number }>({ top: 56, left: 16 });
+  const [inlineFormatToolbar, setInlineFormatToolbar] = useState<{ top: number; left: number; visible: boolean }>({ top: 0, left: 0, visible: false });
+  const canvasRootRef = useRef<HTMLDivElement | null>(null);
+  const workspaceRef = useRef<HTMLDivElement | null>(null);
+  const floatingToolbarRef = useRef<HTMLDivElement | null>(null);
+  const inlineSelectionRef = useRef<{ range: Range; blockId: string; field: keyof EmailBlock; element: HTMLElement } | null>(null);
 
   const selectedIndex = blocks.findIndex((b) => b.id === selectedBlockId);
   const selectedBlock = selectedIndex !== -1 ? blocks[selectedIndex] : null;
@@ -108,30 +114,135 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
           }
         };
 
-        // Edição rápida diretamente no preview. O usuário dá duplo clique em
-        // conteúdos suportados; salvamos apenas no blur para não gerar dezenas
-        // de estados de undo durante a digitação.
+        // Edição rápida diretamente no preview.
+        //
+        // IMPORTANTE: o HTML dos blocos pode ser atualizado em-place pelo
+        // GeradorProScreen quando uma propriedade muda. Se colocarmos handlers
+        // diretamente em cada [data-inline-edit], esses handlers são perdidos
+        // quando o elemento é substituído. Por isso usamos delegação de eventos
+        // no body do iframe: os listeners sobrevivem aos re-renders dos blocos.
+        doc.body.ondblclick = (event: MouseEvent) => {
+          const target = event.target as HTMLElement | null;
+          const el = target?.closest('[data-inline-edit]') as HTMLElement | null;
+          if (!el || !doc.body.contains(el)) return;
+
+          event.preventDefault();
+          event.stopPropagation();
+
+          const blockEl = el.closest('[data-block-id]') as HTMLElement | null;
+          const blockId = blockEl?.getAttribute('data-block-id');
+          const field = el.getAttribute('data-inline-edit') as keyof EmailBlock | null;
+          if (!blockId || !field) return;
+
+          setSelectedBlockId(blockId);
+          el.contentEditable = 'true';
+          el.dataset.r9Editing = 'true';
+          el.title = '';
+          el.focus();
+
+          // Coloca o cursor no fim do conteúdo sem alterar o HTML existente.
+          try {
+            const selection = doc.getSelection();
+            const range = doc.createRange();
+            range.selectNodeContents(el);
+            range.collapse(false);
+            selection?.removeAllRanges();
+            selection?.addRange(range);
+          } catch {
+            // Alguns motores podem não permitir a seleção imediatamente após o focus.
+          }
+        };
+
+        const updateInlineFormatToolbar = () => {
+          const selection = doc.getSelection();
+          if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
+            setInlineFormatToolbar((prev) => ({ ...prev, visible: false }));
+            return;
+          }
+
+          const range = selection.getRangeAt(0);
+          const container = range.commonAncestorContainer;
+          const containerEl = container.nodeType === Node.ELEMENT_NODE
+            ? container as Element
+            : container.parentElement;
+          const editable = containerEl?.closest?.('[data-inline-edit][contenteditable="true"]') as HTMLElement | null;
+          if (!editable || !doc.body.contains(editable) || !editable.dataset.r9Editing) {
+            setInlineFormatToolbar((prev) => ({ ...prev, visible: false }));
+            return;
+          }
+
+          const blockEl = editable.closest('[data-block-id]') as HTMLElement | null;
+          const blockId = blockEl?.getAttribute('data-block-id');
+          const field = editable.getAttribute('data-inline-edit') as keyof EmailBlock | null;
+          if (!blockId || !field || !selection.toString().trim()) {
+            setInlineFormatToolbar((prev) => ({ ...prev, visible: false }));
+            return;
+          }
+
+          inlineSelectionRef.current = {
+            range: range.cloneRange(),
+            blockId,
+            field,
+            element: editable,
+          };
+
+          const rect = range.getBoundingClientRect();
+          if (!rect.width && !rect.height) {
+            setInlineFormatToolbar((prev) => ({ ...prev, visible: false }));
+            return;
+          }
+
+          const iframe = iframeRef.current;
+          const root = canvasRootRef.current;
+          if (!iframe || !root) return;
+
+          const iframeRect = iframe.getBoundingClientRect();
+          const rootRect = root.getBoundingClientRect();
+          const scaleX = iframe.clientWidth ? iframeRect.width / iframe.clientWidth : 1;
+          const scaleY = iframe.clientHeight ? iframeRect.height / iframe.clientHeight : 1;
+          const selectionCenterX = iframeRect.left + ((rect.left + rect.right) / 2) * scaleX - rootRect.left;
+          const selectionTop = iframeRect.top + rect.top * scaleY - rootRect.top;
+
+          setInlineFormatToolbar({
+            top: Math.max(48, selectionTop - 44),
+            left: Math.max(8, Math.min(selectionCenterX - 92, root.clientWidth - 192)),
+            visible: true,
+          });
+        };
+
+        doc.body.onmouseup = () => {
+          requestAnimationFrame(updateInlineFormatToolbar);
+        };
+        doc.body.onkeyup = () => {
+          requestAnimationFrame(updateInlineFormatToolbar);
+        };
+        doc.addEventListener('selectionchange', updateInlineFormatToolbar);
+
+        // focusout borbulha no DOM, portanto funciona como um blur delegado.
+        // Isso também continua funcionando quando o elemento editável é
+        // reconstruído durante um re-render.
+        doc.body.onfocusout = (event: FocusEvent) => {
+          const target = event.target as HTMLElement | null;
+          if (!target || target.dataset.r9Editing !== 'true') return;
+
+          const blockEl = target.closest('[data-block-id]') as HTMLElement | null;
+          const blockId = blockEl?.getAttribute('data-block-id');
+          const field = target.getAttribute('data-inline-edit') as keyof EmailBlock | null;
+          if (!blockId || !field) return;
+
+          const value = field === 'text' || field === 'headerTitle' || field === 'headerSubtitle'
+            ? target.innerHTML
+            : target.textContent || '';
+
+          target.contentEditable = 'false';
+          delete target.dataset.r9Editing;
+          target.title = 'Duplo clique para editar';
+          inlineSelectionRef.current = null;
+          setInlineFormatToolbar((prev) => ({ ...prev, visible: false }));
+          onInlineBlockEdit(blockId, field, value);
+        };
+
         doc.querySelectorAll<HTMLElement>('[data-inline-edit]').forEach((el) => {
-          el.ondblclick = (event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            const blockId = el.closest('[data-block-id]')?.getAttribute('data-block-id');
-            const field = el.getAttribute('data-inline-edit') as keyof EmailBlock | null;
-            if (!blockId || !field) return;
-            el.contentEditable = 'true';
-            el.dataset.r9Editing = 'true';
-            el.focus();
-          };
-          el.onblur = () => {
-            if (el.dataset.r9Editing !== 'true') return;
-            const blockId = el.closest('[data-block-id]')?.getAttribute('data-block-id');
-            const field = el.getAttribute('data-inline-edit') as keyof EmailBlock | null;
-            if (!blockId || !field) return;
-            const value = field === 'text' ? el.innerHTML : el.textContent || '';
-            el.contentEditable = 'false';
-            delete el.dataset.r9Editing;
-            onInlineBlockEdit(blockId, field, value);
-          };
           el.title = 'Duplo clique para editar';
         });
 
@@ -140,6 +251,36 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
       }
     } catch (e) {
       // Cross-origin safe guard
+    }
+  };
+
+  const applyInlineFormat = (command: 'bold' | 'italic' | 'underline' | 'strikeThrough' | 'removeFormat') => {
+    const saved = inlineSelectionRef.current;
+    const iframe = iframeRef.current;
+    if (!saved || !iframe) return;
+
+    try {
+      const doc = iframe.contentDocument || iframe.contentWindow?.document;
+      if (!doc || !doc.body.contains(saved.element)) return;
+
+      saved.element.contentEditable = 'true';
+      saved.element.focus();
+      const selection = doc.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(saved.range);
+
+      doc.execCommand(command, false);
+
+      const value = saved.field === 'text' || saved.field === 'headerTitle' || saved.field === 'headerSubtitle'
+        ? saved.element.innerHTML
+        : saved.element.textContent || '';
+
+      onInlineBlockEdit(saved.blockId, saved.field, value);
+      setInlineFormatToolbar((prev) => ({ ...prev, visible: false }));
+      inlineSelectionRef.current = null;
+    } catch {
+      // O DOM do iframe pode estar entre dois renders. Nesse caso, o usuário pode
+      // selecionar novamente sem perder o restante do conteúdo.
     }
   };
 
@@ -169,6 +310,78 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
     highlightSelectedBlockInIframe(selectedBlockId);
   }, [selectedBlockId, compiledHtml]);
 
+  // Posiciona a barra de ações ao lado do bloco selecionado, em vez de
+  // mantê-la presa ao topo do canvas. Como o bloco vive dentro do iframe,
+  // convertemos as coordenadas do elemento para as coordenadas do canvas.
+  const updateToolbarPosition = () => {
+    const root = canvasRootRef.current;
+    const iframe = iframeRef.current;
+    const toolbar = floatingToolbarRef.current;
+    if (!root || !iframe || !toolbar || !selectedBlockId) return;
+
+    try {
+      const doc = iframe.contentDocument || iframe.contentWindow?.document;
+      if (!doc) return;
+
+      const selectedEl = Array.from(doc.querySelectorAll<HTMLElement>('[data-block-id]'))
+        .find((el) => el.getAttribute('data-block-id') === selectedBlockId);
+      if (!selectedEl) return;
+
+      const iframeRect = iframe.getBoundingClientRect();
+      const blockRect = selectedEl.getBoundingClientRect();
+      const rootRect = root.getBoundingClientRect();
+      const toolbarRect = toolbar.getBoundingClientRect();
+      const gap = 8;
+
+      // O getBoundingClientRect() do conteúdo do iframe usa as coordenadas
+      // internas dele. Quando o canvas está com zoom, precisamos aplicar a
+      // mesma escala visual do iframe antes de converter para o canvas externo.
+      const scaleX = iframe.clientWidth ? iframeRect.width / iframe.clientWidth : 1;
+      const scaleY = iframe.clientHeight ? iframeRect.height / iframe.clientHeight : 1;
+      const blockLeft = iframeRect.left + blockRect.left * scaleX - rootRect.left;
+      const blockRight = iframeRect.left + blockRect.right * scaleX - rootRect.left;
+      const blockTop = iframeRect.top + blockRect.top * scaleY - rootRect.top;
+      const blockBottom = iframeRect.top + blockRect.bottom * scaleY - rootRect.top;
+      const blockCenterY = (blockTop + blockBottom) / 2;
+
+      const minLeft = 8;
+      const maxLeft = Math.max(minLeft, root.clientWidth - toolbarRect.width - 8);
+
+      // Primeiro tenta colocar a barra à direita do bloco. Se não houver espaço,
+      // coloca à esquerda. Assim ela acompanha o bloco mesmo em telas menores.
+      let left = blockRight + gap;
+      if (left > maxLeft) {
+        left = blockLeft - toolbarRect.width - gap;
+      }
+      left = Math.max(minLeft, Math.min(left, maxLeft));
+
+      const minTop = 52; // abaixo da barra superior do canvas
+      const maxTop = Math.max(minTop, root.clientHeight - toolbarRect.height - 8);
+      let top = blockCenterY - toolbarRect.height / 2;
+      top = Math.max(minTop, Math.min(top, maxTop));
+
+      setToolbarPosition({ top, left });
+    } catch {
+      // O iframe pode estar entre dois renders; a próxima atualização reposiciona.
+    }
+  };
+
+  useEffect(() => {
+    if (!selectedBlockId) return;
+
+    const update = () => requestAnimationFrame(updateToolbarPosition);
+    update();
+
+    const workspace = workspaceRef.current;
+    workspace?.addEventListener('scroll', update, { passive: true });
+    window.addEventListener('resize', update);
+
+    return () => {
+      workspace?.removeEventListener('scroll', update);
+      window.removeEventListener('resize', update);
+    };
+  }, [selectedBlockId, compiledHtml, previewDevice, zoomLevel, iframeHeight]);
+
   // Handle drop from sidebar
   const handleDropOnCanvas = (e: React.DragEvent) => {
     e.preventDefault();
@@ -181,7 +394,7 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
   };
 
   return (
-    <div className="flex-grow h-full flex flex-col bg-slate-100/75 select-none relative overflow-hidden">
+    <div ref={canvasRootRef} className="flex-grow h-full flex flex-col bg-slate-100/75 select-none relative overflow-hidden">
       {/* Canvas Top Controls Toolbar */}
       <div className="h-11 px-4 border-b border-slate-200/90 bg-white/95 backdrop-blur-xs flex items-center justify-between gap-2 z-20 shrink-0">
         {/* Device View Indicator */}
@@ -254,13 +467,32 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
         </div>
       </div>
 
+      {/* Floating text-format toolbar for direct canvas editing. It is separate from
+          the block action toolbar and only appears when the user selects text inside
+          an actively edited canvas field. */}
+      {inlineFormatToolbar.visible && (
+        <div
+          className="absolute z-40 bg-slate-900 text-white rounded-lg shadow-xl px-1.5 py-1 flex items-center gap-0.5 border border-slate-700"
+          style={{ top: inlineFormatToolbar.top, left: inlineFormatToolbar.left }}
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => applyInlineFormat('bold')} className="w-7 h-7 rounded hover:bg-slate-700 font-black" title="Negrito">B</button>
+          <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => applyInlineFormat('italic')} className="w-7 h-7 rounded hover:bg-slate-700 italic font-serif" title="Itálico">I</button>
+          <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => applyInlineFormat('underline')} className="w-7 h-7 rounded hover:bg-slate-700 underline font-bold" title="Sublinhado">U</button>
+          <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => applyInlineFormat('strikeThrough')} className="w-7 h-7 rounded hover:bg-slate-700 line-through font-bold" title="Tachado">S</button>
+          <span className="mx-0.5 h-5 w-px bg-slate-700" />
+          <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => applyInlineFormat('removeFormat')} className="px-2 h-7 rounded hover:bg-slate-700 text-[11px] font-semibold" title="Limpar formatação da seleção">Limpar</button>
+        </div>
+      )}
+
       {/* Floating Action Toolbar for the Selected Block */}
       {selectedBlock && selectedIndex !== -1 && (
-        <div className="absolute top-14 left-1/2 -translate-x-1/2 z-30 bg-slate-900 text-white rounded-xl shadow-xl px-3 py-1.5 flex items-center gap-2 text-xs border border-slate-700 animate-slideDown">
-          <span className="font-semibold text-slate-300 pr-1 border-r border-slate-700">
-            Bloco: {selectedBlock.type}
-          </span>
-
+        <div
+          ref={floatingToolbarRef}
+          style={{ top: toolbarPosition.top, left: toolbarPosition.left }}
+          className="absolute z-30 bg-slate-900 text-white rounded-xl shadow-xl px-2 py-1.5 flex items-center gap-1 text-xs border border-slate-700 animate-slideDown"
+        >
           <div className="flex items-center gap-1">
             <button
               type="button"
@@ -314,6 +546,7 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
 
       {/* Canvas Workspace Area with Scroll */}
       <div
+        ref={workspaceRef}
         onDragOver={(e) => {
           e.preventDefault();
           setIsDragOver(true);

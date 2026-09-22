@@ -923,6 +923,7 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                   <div className="grid grid-cols-4 gap-1.5">
                     <button
                       type="button"
+                      onMouseDown={(e) => e.preventDefault()}
                       onClick={() => applyFormattingToSelection('bold')}
                       className={`p-1.5 rounded-lg border text-xs font-bold flex items-center justify-center gap-1 transition-all cursor-pointer ${
                         selectedBlock.isBold
@@ -937,6 +938,7 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
 
                     <button
                       type="button"
+                      onMouseDown={(e) => e.preventDefault()}
                       onClick={() => applyFormattingToSelection('italic')}
                       className={`p-1.5 rounded-lg border text-xs font-medium italic flex items-center justify-center gap-1 transition-all cursor-pointer ${
                         selectedBlock.isItalic
@@ -951,6 +953,7 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
 
                     <button
                       type="button"
+                      onMouseDown={(e) => e.preventDefault()}
                       onClick={() => applyFormattingToSelection('underline')}
                       className={`p-1.5 rounded-lg border text-xs underline flex items-center justify-center gap-1 transition-all cursor-pointer ${
                         selectedBlock.isUnderline
@@ -965,6 +968,7 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
 
                     <button
                       type="button"
+                      onMouseDown={(e) => e.preventDefault()}
                       onClick={() => applyFormattingToSelection('strikethrough')}
                       className={`p-1.5 rounded-lg border text-xs line-through flex items-center justify-center gap-1 transition-all cursor-pointer ${
                         selectedBlock.isStrikethrough

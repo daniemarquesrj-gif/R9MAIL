@@ -39,6 +39,7 @@ export const RichTextEditor = forwardRef<RichTextEditorRef, RichTextEditorProps>
   ) => {
     const editorRef = useRef<HTMLDivElement>(null);
     const lastHtmlRef = useRef<string | null>(null);
+    const savedSelectionRef = useRef<Range | null>(null);
 
     // Synchronize innerHTML when value prop changes externally or on mount
     useEffect(() => {
@@ -90,14 +91,15 @@ export const RichTextEditor = forwardRef<RichTextEditorRef, RichTextEditorProps>
       }
     };
 
-    // Check selection
+    // Check and preserve selection so toolbar clicks do not destroy the range.
     const handleSelection = () => {
-      if (onSelectionChange && window.getSelection) {
-        const sel = window.getSelection();
-        if (sel && editorRef.current && editorRef.current.contains(sel.anchorNode)) {
-          const selectedText = sel.toString();
-          onSelectionChange(selectedText);
-        }
+      if (!window.getSelection || !editorRef.current) return;
+      const sel = window.getSelection();
+      if (!sel || sel.rangeCount === 0 || !editorRef.current.contains(sel.anchorNode)) return;
+
+      savedSelectionRef.current = sel.getRangeAt(0).cloneRange();
+      if (onSelectionChange) {
+        onSelectionChange(sel.toString());
       }
     };
 
@@ -109,11 +111,22 @@ export const RichTextEditor = forwardRef<RichTextEditorRef, RichTextEditorProps>
         }
       },
       execCommand: (command: string, value: string = '') => {
-        if (editorRef.current) {
-          editorRef.current.focus();
-          document.execCommand(command, false, value);
-          handleInput();
+        if (!editorRef.current) return;
+
+        editorRef.current.focus();
+        const sel = window.getSelection();
+        if (sel && savedSelectionRef.current) {
+          try {
+            sel.removeAllRanges();
+            sel.addRange(savedSelectionRef.current);
+          } catch {
+            // The DOM may have been rebuilt; keep the current caret in that case.
+          }
         }
+
+        document.execCommand(command, false, value);
+        handleInput();
+        handleSelection();
       },
       insertHtml: (html: string) => {
         if (editorRef.current) {
