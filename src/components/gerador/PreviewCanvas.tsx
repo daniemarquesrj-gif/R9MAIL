@@ -111,6 +111,21 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
         // Listener de clique nos blocos
         doc.body.onclick = (e: MouseEvent) => {
           let target = e.target as HTMLElement | null;
+
+          // No editor, links de botões não devem navegar para fora da aplicação.
+          // O href real continua preservado no HTML/exportação e será usado
+          // somente no disparo do e-mail. Aqui o clique serve apenas para
+          // selecionar o bloco e permitir a edição.
+          const buttonLink = target?.closest('a[data-inline-edit=\"buttonLabel\"], a.btn, a.btn-full, a.btn-auto') as HTMLAnchorElement | null;
+          if (buttonLink) {
+            e.preventDefault();
+            e.stopPropagation();
+            const blockEl = buttonLink.closest('[data-block-id]') as HTMLElement | null;
+            const blockId = blockEl?.getAttribute('data-block-id');
+            if (blockId) setSelectedBlockId(blockId);
+            return;
+          }
+
           while (target && target !== doc.body) {
             const blockId = target.getAttribute('data-block-id');
             if (blockId) {
