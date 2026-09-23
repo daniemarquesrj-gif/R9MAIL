@@ -45,15 +45,47 @@ export function sanitizeCssValue(value: unknown, fallback = ''): string {
     .replace(/\bvbscript\s*:/gi, '');
 }
 
+const TEMPLATE_VARIABLE = /\{\{[A-Za-z0-9_.-]+\}\}/g;
+
+/**
+ * URLs may contain mail-merge variables, e.g. https://portal.exemplo/{{var1}}
+ * or a variable that itself contains the complete URL, e.g. {{var1}}.
+ * Validate the static URL structure while keeping the template tokens intact.
+ */
+function normalizeTemplateUrl(raw: string): string | null {
+  const tokens = raw.match(TEMPLATE_VARIABLE) || [];
+  if (tokens.length === 0) return null;
+
+  const withoutTokens = raw.replace(TEMPLATE_VARIABLE, 'r9var');
+  if (!SAFE_URL_PROTOCOLS.test(withoutTokens)) return null;
+
+  try {
+    const parsed = new URL(withoutTokens);
+    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:' && parsed.protocol !== 'mailto:' && parsed.protocol !== 'tel:') {
+      return null;
+    }
+  } catch {
+    return null;
+  }
+
+  return raw.replace(/[\"'<>]/g, '');
+}
+
 export function sanitizeUrl(value: unknown, kind: 'href' | 'src' = 'href'): string {
   const raw = String(value ?? '').trim();
   if (!raw) return '';
 
   if (kind === 'src') {
-    return SAFE_IMAGE_PROTOCOLS.test(raw) ? raw.replace(/["'<>]/g, '') : '';
+    return SAFE_IMAGE_PROTOCOLS.test(raw) ? raw.replace(/[\"'<>]/g, '') : '';
   }
 
-  return SAFE_URL_PROTOCOLS.test(raw) ? raw.replace(/["'<>]/g, '') : '';
+  const normalizedTemplate = normalizeTemplateUrl(raw);
+  if (normalizedTemplate) return normalizedTemplate;
+
+  // A complete template variable is allowed to resolve to a URL at send time.
+  if (/^\{\{[A-Za-z0-9_.-]+\}\}$/.test(raw)) return raw;
+
+  return SAFE_URL_PROTOCOLS.test(raw) ? raw.replace(/[\"'<>]/g, '') : '';
 }
 
 function sanitizeStyleAttribute(value: string): string {

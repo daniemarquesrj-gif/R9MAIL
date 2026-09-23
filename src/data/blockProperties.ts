@@ -1,4 +1,5 @@
 import type { BlockType, EmailBlock } from '../types';
+import { sanitizeUrl } from '../utils/security';
 
 export type BlockPropertyKind =
   | 'text'
@@ -91,11 +92,7 @@ function normalizeColor(value: string): string | null {
 function normalizeUrl(value: string): string | null {
   const trimmed = value.trim();
   if (!trimmed) return '';
-  try {
-    const parsed = new URL(trimmed);
-    if (parsed.protocol === 'https:' || parsed.protocol === 'http:') return parsed.toString();
-  } catch { /* invalid */ }
-  return null;
+  return sanitizeUrl(trimmed, 'href') || null;
 }
 
 export function sanitizeBlockPropertyUpdate(updatedProps: Partial<Omit<EmailBlock, 'lineHeight'> & { lineHeight?: string | number }>): Partial<EmailBlock> {

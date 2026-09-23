@@ -19,6 +19,10 @@ describe('security helpers', () => {
     expect(sanitizeUrl('javascript:alert(1)', 'href')).toBe('');
     expect(sanitizeUrl('data:text/html,<script>alert(1)</script>', 'src')).toBe('');
     expect(sanitizeUrl('https://example.com/path', 'href')).toBe('https://example.com/path');
+    expect(sanitizeUrl('https://example.com/aluno/{{var1}}', 'href')).toBe('https://example.com/aluno/{{var1}}');
+    expect(sanitizeUrl('https://example.com/boleto?id={{var1}}', 'href')).toBe('https://example.com/boleto?id={{var1}}');
+    expect(sanitizeUrl('{{var1}}', 'href')).toBe('{{var1}}');
+    expect(sanitizeUrl('javascript:{{var1}}', 'href')).toBe('');
     expect(isSafeEmailUrl('mailto:test@example.com')).toBe(true);
   });
 

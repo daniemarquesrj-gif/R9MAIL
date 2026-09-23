@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { EmailBlock, BlockType, EmailData } from '../../types';
 import { RichTextEditor, RichTextEditorRef } from '../RichTextEditor';
 import { LinkEditorModal } from './LinkEditorModal';
@@ -176,6 +176,24 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
     layout: false,
     advanced: false,
   });
+
+  // URL do botão: mantemos um rascunho local durante a digitação.
+  // O sanitizador central exige uma URL completa (http/https), então aplicar
+  // sanitizeBlockPropertyUpdate a cada tecla fazia o input controlado voltar ao
+  // valor anterior assim que o usuário digitava, por exemplo, apenas "h" ou "https://".
+  const [buttonUrlDraft, setButtonUrlDraft] = useState('');
+
+  useEffect(() => {
+    if (selectedBlock?.type === 'button') {
+      setButtonUrlDraft(selectedBlock.buttonUrl || '');
+    } else {
+      setButtonUrlDraft('');
+    }
+  }, [selectedBlock?.id, selectedBlock?.type, selectedBlock?.buttonUrl]);
+
+  const commitButtonUrl = () => {
+    updateSelectedBlock({ buttonUrl: buttonUrlDraft });
+  };
 
   const toggleSection = (section: keyof typeof openSections) => {
     setOpenSections((prev) => ({ ...prev, [section]: !prev[section] }));
@@ -521,9 +539,18 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                     <div className="relative">
                       <input
                         type="url"
-                        value={selectedBlock.buttonUrl || ''}
-                        onChange={(e) => updateSelectedBlock({ buttonUrl: e.target.value })}
+                        value={buttonUrlDraft}
+                        onChange={(e) => setButtonUrlDraft(e.target.value)}
+                        onBlur={commitButtonUrl}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            commitButtonUrl();
+                            e.currentTarget.blur();
+                          }
+                        }}
                         placeholder="https://exemplo.com.br"
+                        autoComplete="url"
                         className="w-full p-2.5 pr-8 rounded-lg border border-slate-300 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 text-xs font-mono"
                       />
                       <ExternalLink className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-3" />
