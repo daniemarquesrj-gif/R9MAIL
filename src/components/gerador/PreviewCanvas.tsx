@@ -1,5 +1,6 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useImperativeHandle, forwardRef, useCallback, useMemo } from 'react';
 import { EmailBlock, BlockType } from '../../types';
+import { generateSingleBlockHtml } from '../../utils/compiler';
 import {
   Monitor,
   Smartphone,
@@ -16,13 +17,18 @@ import {
   LayoutTemplate,
 } from 'lucide-react';
 
-interface PreviewCanvasProps {
+export interface PreviewCanvasHandle {
+  commitInlineEdit: () => void;
+}
+
+export interface PreviewCanvasProps {
   compiledHtml: string;
   blocks: EmailBlock[];
   selectedBlockId: string | null;
   setSelectedBlockId: (id: string | null) => void;
   onInlineBlockEdit: (blockId: string, field: keyof EmailBlock, value: string) => void;
   onInlineBlockDraft: (blockId: string, field: keyof EmailBlock, value: string) => void;
+  onSaveRequested?: () => void;
   previewDevice: 'desktop' | 'mobile';
   setPreviewDevice: (device: 'desktop' | 'mobile') => void;
   iframeHeight: number;
@@ -38,13 +44,14 @@ interface PreviewCanvasProps {
   onOpenBlockSelector: () => void;
 }
 
-export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
+export const PreviewCanvas = forwardRef<PreviewCanvasHandle, PreviewCanvasProps>(({
   compiledHtml,
   blocks,
   selectedBlockId,
   setSelectedBlockId,
   onInlineBlockEdit,
   onInlineBlockDraft,
+  onSaveRequested,
   previewDevice,
   setPreviewDevice,
   iframeHeight,
@@ -58,7 +65,7 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
   onAddBlock,
   onOpenTemplates,
   onOpenBlockSelector,
-}) => {
+}, ref) => {
   const [zoomLevel, setZoomLevel] = useState<number>(100);
   const [isDragOver, setIsDragOver] = useState<boolean>(false);
   const [toolbarPosition, setToolbarPosition] = useState<{ top: number; left: number }>({ top: 56, left: 16 });
@@ -67,16 +74,137 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
   const workspaceRef = useRef<HTMLDivElement | null>(null);
   const floatingToolbarRef = useRef<HTMLDivElement | null>(null);
   const inlineSelectionRef = useRef<{ range: Range; blockId: string; field: keyof EmailBlock; element: HTMLElement } | null>(null);
+
+  // Stable references for callbacks to prevent stale closure bugs in iframe event handlers
+  const onInlineBlockEditRef = useRef(onInlineBlockEdit);
+  onInlineBlockEditRef.current = onInlineBlockEdit;
+  const onInlineBlockDraftRef = useRef(onInlineBlockDraft);
+  onInlineBlockDraftRef.current = onInlineBlockDraft;
+  const onSaveRequestedRef = useRef(onSaveRequested);
+  onSaveRequestedRef.current = onSaveRequested;
+  const setSelectedBlockIdRef = useRef(setSelectedBlockId);
+  setSelectedBlockIdRef.current = setSelectedBlockId;
+
+  // Active inline editing tracking
+  const activeInlineEditorRef = useRef<{
+    blockId: string;
+    field: keyof EmailBlock;
+    element: HTMLElement;
+  } | null>(null);
+  const debounceTimerRef = useRef<number | null>(null);
+
   const readInlineEditValue = (element: HTMLElement, field: keyof EmailBlock): string => {
-    return field === 'text' || field === 'headerTitle' || field === 'headerSubtitle'
+    return field === 'text' || field === 'headerTitle' || field === 'headerSubtitle' || field === 'footerText' || field === 'buttonLabel'
       ? element.innerHTML
-      : element.textContent || '';
+      : element.innerText || element.textContent || '';
   };
+
+  const commitCurrentInlineEdit = useCallback(() => {
+    if (debounceTimerRef.current !== null) {
+      window.clearTimeout(debounceTimerRef.current);
+      debounceTimerRef.current = null;
+    }
+
+    const active = activeInlineEditorRef.current;
+    if (!active || !active.element) {
+      activeInlineEditorRef.current = null;
+      return;
+    }
+
+    const { blockId, field, element } = active;
+    const value = readInlineEditValue(element, field);
+    onInlineBlockEditRef.current(blockId, field, value);
+
+    element.contentEditable = 'false';
+    delete element.dataset.r9Editing;
+    element.title = 'Duplo clique para editar';
+    activeInlineEditorRef.current = null;
+    setInlineFormatToolbar((prev) => ({ ...prev, visible: false }));
+  }, []);
+
+  // Expose imperative handle so parent (GeradorProScreen) can flush anytime
+  useImperativeHandle(ref, () => ({
+    commitInlineEdit: commitCurrentInlineEdit,
+  }), [commitCurrentInlineEdit]);
+
+  // Keep srcDoc stable unless the structure of blocks or preview device changes.
+  // This prevents the iframe from reloading when block contents change,
+  // ensuring the user's cursor / caret is NEVER destroyed during typing.
+  const structureKey = useMemo(() => {
+    return blocks.map((b) => `${b.id}:${b.type}`).join('|') + `:${previewDevice}`;
+  }, [blocks, previewDevice]);
+
+  const [currentSrcDoc, setCurrentSrcDoc] = useState(compiledHtml);
+  const prevStructureKeyRef = useRef(structureKey);
+
+  useEffect(() => {
+    if (prevStructureKeyRef.current !== structureKey) {
+      prevStructureKeyRef.current = structureKey;
+      commitCurrentInlineEdit();
+      setCurrentSrcDoc(compiledHtml);
+    }
+  }, [structureKey, compiledHtml, commitCurrentInlineEdit]);
+
+  // Synchronize block changes in-place in the iframe DOM without a full reload
+  useEffect(() => {
+    if (!iframeRef.current || !iframeRef.current.contentWindow) return;
+    try {
+      const doc = iframeRef.current.contentDocument || iframeRef.current.contentWindow.document;
+      if (!doc || !doc.body) return;
+
+      blocks.forEach((block) => {
+        const blockEl = doc.querySelector(`[data-block-id="${block.id}"]`) as HTMLElement | null;
+        if (blockEl) {
+          // If this block is currently being typed in directly in the canvas, do not replace it
+          if (activeInlineEditorRef.current?.blockId === block.id) return;
+          const activeEditingEl = blockEl.querySelector('[data-inline-edit][contenteditable="true"][data-r9-editing="true"]');
+          if (activeEditingEl) return;
+
+          const tempDiv = doc.createElement('div');
+          tempDiv.innerHTML = generateSingleBlockHtml(block).trim();
+          const newBlockEl = tempDiv.firstElementChild;
+          if (newBlockEl && blockEl.outerHTML !== newBlockEl.outerHTML) {
+            blockEl.replaceWith(newBlockEl);
+            newBlockEl.querySelectorAll<HTMLElement>('[data-inline-edit]').forEach((el) => {
+              el.title = 'Duplo clique para editar';
+            });
+          }
+        }
+      });
+
+      highlightSelectedBlockInIframe(selectedBlockId);
+      handleIframeLoad();
+    } catch {
+      // Safe guard
+    }
+  }, [blocks, selectedBlockId, handleIframeLoad, iframeRef]);
+
+  // Global parent window listener: whenever user clicks anywhere outside the iframe
+  // (e.g. TopBar, PropertiesPanel, Sidebars, Modals), commit any active canvas inline edit immediately!
+  useEffect(() => {
+    const handleParentMouseDown = (e: MouseEvent) => {
+      if (!activeInlineEditorRef.current) return;
+      // If clicking inside the iframe container, let iframe handlers handle it
+      if (iframeRef.current && iframeRef.current.contains(e.target as Node)) return;
+      commitCurrentInlineEdit();
+    };
+
+    window.addEventListener('mousedown', handleParentMouseDown, true);
+    window.addEventListener('blur', commitCurrentInlineEdit);
+
+    return () => {
+      window.removeEventListener('mousedown', handleParentMouseDown, true);
+      window.removeEventListener('blur', commitCurrentInlineEdit);
+      if (debounceTimerRef.current !== null) {
+        window.clearTimeout(debounceTimerRef.current);
+      }
+    };
+  }, [commitCurrentInlineEdit, iframeRef]);
 
   const selectedIndex = blocks.findIndex((b) => b.id === selectedBlockId);
   const selectedBlock = selectedIndex !== -1 ? blocks[selectedIndex] : null;
 
-  // Enhance iframe with click detection and selected block highlighting
+  // Enhance iframe with click detection, keyboard shortcuts, and inline editing
   const handleEnhancedIframeLoad = () => {
     handleIframeLoad();
     try {
@@ -104,6 +232,13 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
               outline-offset: -2px !important;
               box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.2) !important;
             }
+            [data-inline-edit][contenteditable="true"] {
+              outline: 2px solid #6366f1 !important;
+              outline-offset: 2px !important;
+              border-radius: 4px !important;
+              cursor: text !important;
+              background-color: rgba(99, 102, 241, 0.04) !important;
+            }
           `;
           doc.head.appendChild(styleTag);
         }
@@ -112,17 +247,19 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
         doc.body.onclick = (e: MouseEvent) => {
           let target = e.target as HTMLElement | null;
 
+          // Se estava editando um elemento e clicou fora dele, confirma a edição
+          if (activeInlineEditorRef.current && (!target || !activeInlineEditorRef.current.element.contains(target))) {
+            commitCurrentInlineEdit();
+          }
+
           // No editor, links de botões não devem navegar para fora da aplicação.
-          // O href real continua preservado no HTML/exportação e será usado
-          // somente no disparo do e-mail. Aqui o clique serve apenas para
-          // selecionar o bloco e permitir a edição.
-          const buttonLink = target?.closest('a[data-inline-edit=\"buttonLabel\"], a.btn, a.btn-full, a.btn-auto') as HTMLAnchorElement | null;
+          const buttonLink = target?.closest('a[data-inline-edit="buttonLabel"], a.btn, a.btn-full, a.btn-auto') as HTMLAnchorElement | null;
           if (buttonLink) {
             e.preventDefault();
             e.stopPropagation();
             const blockEl = buttonLink.closest('[data-block-id]') as HTMLElement | null;
             const blockId = blockEl?.getAttribute('data-block-id');
-            if (blockId) setSelectedBlockId(blockId);
+            if (blockId) setSelectedBlockIdRef.current(blockId);
             return;
           }
 
@@ -130,29 +267,24 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
             const blockId = target.getAttribute('data-block-id');
             if (blockId) {
               e.stopPropagation();
-              setSelectedBlockId(blockId);
+              setSelectedBlockIdRef.current(blockId);
               return;
             }
             target = target.parentElement;
           }
         };
 
-        // Edição rápida diretamente no preview.
-        //
-        // IMPORTANTE: o HTML dos blocos pode ser atualizado em-place pelo
-        // GeradorProScreen quando uma propriedade muda. Se colocarmos handlers
-        // diretamente em cada [data-inline-edit], esses handlers são perdidos
-        // quando o elemento é substituído. Por isso usamos delegação de eventos
-        // no body do iframe: os listeners sobrevivem aos re-renders dos blocos.
+        // Edição rápida diretamente no preview (duplo clique)
         doc.body.ondblclick = (event: MouseEvent) => {
           const target = event.target as HTMLElement | null;
           const el = target?.closest('[data-inline-edit]') as HTMLElement | null;
           if (!el || !doc.body.contains(el)) return;
 
-          // Não usamos preventDefault aqui: o navegador precisa concluir a
-          // seleção nativa da palavra no duplo clique. Interromper o default
-          // nesse ponto fazia a seleção desaparecer antes de entrarmos no modo
-          // de edição.
+          // Se havia outro elemento em edição, confirma-o primeiro
+          if (activeInlineEditorRef.current && (!el || !activeInlineEditorRef.current.element.contains(el))) {
+            commitCurrentInlineEdit();
+          }
+
           event.stopPropagation();
 
           const blockEl = el.closest('[data-block-id]') as HTMLElement | null;
@@ -160,15 +292,14 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
           const field = el.getAttribute('data-inline-edit') as keyof EmailBlock | null;
           if (!blockId || !field) return;
 
-          setSelectedBlockId(blockId);
+          setSelectedBlockIdRef.current(blockId);
+          activeInlineEditorRef.current = { blockId, field, element: el };
           el.contentEditable = 'true';
           el.dataset.r9Editing = 'true';
           el.title = '';
           el.focus();
 
-          // Mantém a seleção de palavra criada pelo duplo clique. O handler
-          // antigo selecionava todo o conteúdo e colapsava no final, fazendo
-          // parecer que o duplo clique não selecionava nada.
+          // Mantém a seleção de palavra criada pelo duplo clique se disponível
           try {
             const selection = doc.getSelection();
             if (!selection || selection.rangeCount === 0 || !selection.toString()) {
@@ -179,7 +310,7 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
               selection?.addRange(range);
             }
           } catch {
-            // Alguns motores podem não permitir a seleção imediatamente após o focus.
+            // Safe guard
           }
         };
 
@@ -248,43 +379,62 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
         };
         doc.addEventListener('selectionchange', updateInlineFormatToolbar);
 
-        // Durante a edição, o DOM do iframe é a fonte de verdade do campo.
-        // Atualizamos somente o draft do painel a cada input. NÃO alteramos
-        // `blocks` aqui: fazer isso reconstruiria/substituiria o elemento
-        // contenteditable e faria o caret desaparecer durante a digitação.
+        // Atualização em tempo real enquanto o usuário digita:
+        // 1. Atualiza o rascunho instantaneamente para reflexão em outros painéis.
+        // 2. Chama onInlineBlockEdit para que blocks seja atualizado na mesma hora de forma coalescida.
         doc.body.oninput = (event: Event) => {
           const target = event.target as HTMLElement | null;
-          if (!target || target.dataset.r9Editing !== 'true') return;
+          const editingEl = (target?.closest?.('[data-r9-editing="true"]') || target?.closest?.('[data-inline-edit][contenteditable="true"]')) as HTMLElement | null;
+          if (!editingEl) return;
 
-          const blockEl = target.closest('[data-block-id]') as HTMLElement | null;
+          const blockEl = editingEl.closest('[data-block-id]') as HTMLElement | null;
           const blockId = blockEl?.getAttribute('data-block-id');
-          const field = target.getAttribute('data-inline-edit') as keyof EmailBlock | null;
+          const field = editingEl.getAttribute('data-inline-edit') as keyof EmailBlock | null;
           if (!blockId || !field) return;
 
-          const value = readInlineEditValue(target, field);
-          onInlineBlockDraft(blockId, field, value);
+          const value = readInlineEditValue(editingEl, field);
+          activeInlineEditorRef.current = { blockId, field, element: editingEl };
+          onInlineBlockDraftRef.current(blockId, field, value);
+          onInlineBlockEditRef.current(blockId, field, value);
         };
 
-        doc.body.onfocusout = (event: FocusEvent) => {
-          const target = event.target as HTMLElement | null;
-          if (!target || target.dataset.r9Editing !== 'true') return;
+        // Quando o elemento perde foco dentro do iframe: commit garantido
+        doc.body.addEventListener('focusout', (e: Event) => {
+          const focusEvent = e as FocusEvent;
+          const related = focusEvent.relatedTarget as Node | null;
+          if (activeInlineEditorRef.current && related && activeInlineEditorRef.current.element.contains(related)) {
+            return;
+          }
+          commitCurrentInlineEdit();
+        });
 
-          const blockEl = target.closest('[data-block-id]') as HTMLElement | null;
-          const blockId = blockEl?.getAttribute('data-block-id');
-          const field = target.getAttribute('data-inline-edit') as keyof EmailBlock | null;
-          if (!blockId || !field) return;
+        // Atalhos de teclado no iframe:
+        // - Escape: encerra a edição e salva o valor digitado.
+        // - Enter em campos de linha única (título, subtítulo, botão): encerra edição e salva.
+        // - Ctrl+S / Cmd+S: salva o template imediatamente.
+        doc.addEventListener('keydown', (e: KeyboardEvent) => {
+          if (e.key === 'Escape') {
+            commitCurrentInlineEdit();
+            return;
+          }
+          if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+            e.preventDefault();
+            commitCurrentInlineEdit();
+            onSaveRequestedRef.current?.();
+            return;
+          }
+          if (e.key === 'Enter') {
+            const target = e.target as HTMLElement | null;
+            const editable = target?.closest?.('[data-inline-edit]') as HTMLElement | null;
+            const field = editable?.getAttribute('data-inline-edit');
+            if (field && field !== 'text' && field !== 'footerText') {
+              e.preventDefault();
+              commitCurrentInlineEdit();
+            }
+          }
+        });
 
-          // Commit somente quando a edição termina. Durante a digitação não
-          // alteramos `blocks`, portanto o iframe e o caret permanecem intactos.
-          const value = readInlineEditValue(target, field);
-          onInlineBlockEdit(blockId, field, value);
-
-          target.contentEditable = 'false';
-          delete target.dataset.r9Editing;
-          target.title = 'Duplo clique para editar';
-          inlineSelectionRef.current = null;
-          setInlineFormatToolbar((prev) => ({ ...prev, visible: false }));
-        };
+        doc.defaultView?.addEventListener('blur', commitCurrentInlineEdit);
 
         doc.querySelectorAll<HTMLElement>('[data-inline-edit]').forEach((el) => {
           el.title = 'Duplo clique para editar';
@@ -293,7 +443,7 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
         // Aplica classe de selecionado
         highlightSelectedBlockInIframe(selectedBlockId);
       }
-    } catch (e) {
+    } catch {
       // Cross-origin safe guard
     }
   };
@@ -315,16 +465,12 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
 
       doc.execCommand(command, false);
 
-      const value = saved.field === 'text' || saved.field === 'headerTitle' || saved.field === 'headerSubtitle'
-        ? saved.element.innerHTML
-        : saved.element.textContent || '';
-
-      onInlineBlockEdit(saved.blockId, saved.field, value);
+      const value = readInlineEditValue(saved.element, saved.field);
+      onInlineBlockEditRef.current(saved.blockId, saved.field, value);
       setInlineFormatToolbar((prev) => ({ ...prev, visible: false }));
       inlineSelectionRef.current = null;
     } catch {
-      // O DOM do iframe pode estar entre dois renders. Nesse caso, o usuário pode
-      // selecionar novamente sem perder o restante do conteúdo.
+      // Safe guard
     }
   };
 
@@ -345,7 +491,7 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
           }
         }
       }
-    } catch (e) {
+    } catch {
       // Cross-origin safe guard
     }
   };
@@ -663,7 +809,7 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
               ref={iframeRef}
               onLoad={handleEnhancedIframeLoad}
               title="R9Bot Mailer Live Canvas Preview"
-              srcDoc={compiledHtml}
+              srcDoc={currentSrcDoc}
               scrolling="no"
               style={{ height: `${iframeHeight}px` }}
               className="w-full border-0 block transition-[height] duration-200"
@@ -673,4 +819,4 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
       </div>
     </div>
   );
-};
+});

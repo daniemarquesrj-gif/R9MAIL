@@ -110,7 +110,7 @@ export function generateSingleBlockHtml(block: EmailBlock): string {
       const margin = align === 'left' ? '0 auto 0 0' : align === 'right' ? '0 0 0 auto' : '0 auto';
 
       let imgHtml = imgUrl
-        ? `<img src="${imgUrl}" alt="${alt}" class="email-header-img" width="${width}" style="display: block; width: ${width}px; max-width: 100% !important; height: auto !important; border: 0; outline: none; text-decoration: none; margin: ${margin};" />`
+        ? `<img src="${imgUrl}" alt="${alt}" class="email-header-img" width="${width}" style="display: block; width: ${width}px; max-width: 100%; height: auto !important; border: 0; outline: none; text-decoration: none; margin: ${margin};" />`
         : `<div role="img" aria-label="${alt}" style="padding:32px 16px;background:#f1f5f9;color:#64748b;text-align:center;font-family:Helvetica,Arial,sans-serif;font-size:13px;max-width:${width}px;margin:${margin};box-sizing:border-box;">Adicione uma imagem</div>`;
       if (link) {
         imgHtml = `<a href="${link}" target="_blank" style="text-decoration: none; display: block; width: 100%;">${imgHtml}</a>`;
@@ -195,7 +195,7 @@ export function generateSingleBlockHtml(block: EmailBlock): string {
       const margin = align === 'left' ? '0 auto 0 0' : align === 'right' ? '0 0 0 auto' : '0 auto';
 
       let imgHtml = imgUrl
-        ? `<img src="${imgUrl}" alt="${alt}" class="email-banner-img" width="${width}" style="display:block; width:${width}px; max-width:100% !important; height:auto !important; border:0; outline:none; text-decoration:none; margin:${margin}; border-radius:6px; object-fit:contain;" />`
+        ? `<img src="${imgUrl}" alt="${alt}" class="email-banner-img" width="${width}" style="display:block; width:${width}px; max-width:100%; height:auto !important; border:0; outline:none; text-decoration:none; margin:${margin}; border-radius:6px; object-fit:contain;" />`
         : `<div role="img" aria-label="${alt}" style="padding:32px 16px;background:#f1f5f9;color:#64748b;text-align:center;font-family:Helvetica,Arial,sans-serif;font-size:13px;max-width:${width}px;margin:${margin};box-sizing:border-box;">Adicione uma imagem</div>`;
       if (link && imgUrl) {
         imgHtml = `<a href="${link}" style="text-decoration:none; display:block; width:100%;">${imgHtml}</a>`;
@@ -218,8 +218,8 @@ export function generateSingleBlockHtml(block: EmailBlock): string {
       return `
     <div ${blockIdAttr} style="padding: 20px 28px; font-family: Helvetica, Arial, sans-serif; ${bgStyle}">
       <div style="background-color: ${bg}; border: 2px dashed ${border}; border-radius: 10px; padding: 20px; text-align: center;">
-        <span style="display: block; font-size: 12px; font-weight: bold; color: ${border}; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px;">${discount}</span>
-        <div style="font-family: monospace; font-size: 22px; font-weight: bold; color: #0f172a; letter-spacing: 2px; padding: 6px 0;">
+        <span data-inline-edit="couponDiscount" style="display: block; font-size: 12px; font-weight: bold; color: ${border}; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px;">${discount}</span>
+        <div data-inline-edit="couponCode" style="font-family: monospace; font-size: 22px; font-weight: bold; color: #0f172a; letter-spacing: 2px; padding: 6px 0;">
           ${code}
         </div>
       </div>
@@ -268,7 +268,7 @@ export function generateSingleBlockHtml(block: EmailBlock): string {
 
       return `
     <div ${blockIdAttr} style="background-color: ${bg}; padding: 20px 24px; border-top: 1px solid #f1f5f9;">
-      <div style="${style}">${formatted}</div>
+      <div data-inline-edit="footerText" style="${style}">${formatted}</div>
     </div>`;
     }
     default:

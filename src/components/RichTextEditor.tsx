@@ -91,8 +91,9 @@ export const RichTextEditor = forwardRef<RichTextEditorRef, RichTextEditorProps>
     const handleInput = () => {
       if (editorRef.current) {
         const html = editorRef.current.innerHTML;
-        lastHtmlRef.current = html;
-        onChange(sanitizeRichText(html));
+        const sanitized = sanitizeRichText(html);
+        lastHtmlRef.current = sanitized;
+        onChange(sanitized);
       }
     };
 

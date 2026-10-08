@@ -15,6 +15,7 @@ import {
   BlocksSidebar,
   PropertiesPanel,
   PreviewCanvas,
+  PreviewCanvasHandle,
 } from '../components/gerador';
 import { DEFAULT_BLOCKS } from '../data/defaultBlocks';
 import { useEditorHistory } from '../hooks/useEditorHistory';
@@ -71,16 +72,28 @@ export const GeradorProScreen: React.FC<GeradorProScreenProps> = ({
     setEmailData((prev) => ({ ...prev, documentId, contentSource: 'blocks' }));
   }, []);
 
+  const previewCanvasRef = useRef<PreviewCanvasHandle | null>(null);
+  const blocksRef = useRef<EmailBlock[]>(blocks);
+  blocksRef.current = blocks;
+
   const { push: pushToHistory, undo, redo, reset: resetHistory, canUndo, canRedo } = useEditorHistory(blocks);
 
   const handleUndo = useCallback(() => {
+    previewCanvasRef.current?.commitInlineEdit();
     const previous = undo();
-    if (previous) setBlocks(previous);
+    if (previous) {
+      blocksRef.current = previous;
+      setBlocks(previous);
+    }
   }, [undo]);
 
   const handleRedo = useCallback(() => {
+    previewCanvasRef.current?.commitInlineEdit();
     const next = redo();
-    if (next) setBlocks(next);
+    if (next) {
+      blocksRef.current = next;
+      setBlocks(next);
+    }
   }, [redo]);
 
   // Keyboard shortcuts for Undo/Redo
@@ -126,7 +139,6 @@ export const GeradorProScreen: React.FC<GeradorProScreenProps> = ({
     selectedText: string;
   } | null>(null);
   const [hasRichTextSelection, setHasRichTextSelection] = useState(false);
-  const [inlineBlockDrafts, setInlineBlockDrafts] = useState<Record<string, Partial<EmailBlock>>>({});
 
   useEffect(() => {
     setActiveSelection(null);
@@ -143,7 +155,6 @@ export const GeradorProScreen: React.FC<GeradorProScreenProps> = ({
   const activeEditorRef = useRef<RichTextEditorRef | null>(null);
   const previewIframeRef = useRef<HTMLIFrameElement | null>(null);
   const [iframeHeight, setIframeHeight] = useState<number>(600);
-  const prevBlocksRef = useRef<EmailBlock[]>(blocks);
   const localCompiledHtmlRef = useRef<string>(compileBlocksToHtml(blocks));
 
   // Memoize compiled HTML
@@ -169,49 +180,6 @@ export const GeradorProScreen: React.FC<GeradorProScreenProps> = ({
     }
   }, []);
 
-  // Sync iframe block DOM elements in-place when block properties change
-  useEffect(() => {
-    const prev = prevBlocksRef.current;
-    prevBlocksRef.current = blocks;
-
-    if (!previewIframeRef.current || !previewIframeRef.current.contentWindow) return;
-    try {
-      const doc = previewIframeRef.current.contentDocument || previewIframeRef.current.contentWindow.document;
-      if (!doc || !doc.body) return;
-
-      const sameBlockIds =
-        prev.length === blocks.length && prev.every((b, i) => b.id === blocks[i]?.id);
-
-      if (sameBlockIds) {
-        blocks.forEach((block) => {
-          const blockEl = doc.querySelector(`[data-block-id="${block.id}"]`) as HTMLElement | null;
-          if (blockEl) {
-            // Nunca substitua um elemento enquanto ele estiver sendo editado
-            // diretamente no canvas. O DOM do contenteditable é a fonte de
-            // verdade durante a digitação; substituir o nó destrói o caret,
-            // quebra espaço/Enter e faz teclas repetidas parecerem travadas.
-            const activeInlineEditor = blockEl.querySelector('[data-inline-edit][contenteditable="true"][data-r9-editing="true"]');
-            if (activeInlineEditor) return;
-
-            const tempDiv = doc.createElement('div');
-            tempDiv.innerHTML = generateSingleBlockHtml(block).trim();
-            const newBlockEl = tempDiv.firstElementChild;
-            if (newBlockEl && blockEl.outerHTML !== newBlockEl.outerHTML) {
-              blockEl.replaceWith(newBlockEl);
-            }
-          }
-        });
-
-        const scrollH = doc.documentElement?.scrollHeight || doc.body?.scrollHeight;
-        if (scrollH && scrollH > 100) {
-          setIframeHeight((prevH) => (Math.abs(prevH - (scrollH + 10)) > 8 ? scrollH + 10 : prevH));
-        }
-      }
-    } catch {
-      // Fallback
-    }
-  }, [blocks]);
-
   // Continuously sync compiled HTML to emailData for external screens (e.g. VisualizacaoScreen)
   useEffect(() => {
     localCompiledHtmlRef.current = compiledHtml;
@@ -225,33 +193,36 @@ export const GeradorProScreen: React.FC<GeradorProScreenProps> = ({
         subject: prev.subject || prev.headerTitle,
       };
     });
-  }, [compiledHtml, setEmailData]);
+  }, [compiledHtml, documentId, setEmailData]);
 
   const showToast = useCallback((msg: string, kind: 'success' | 'error' | 'info' = 'success') => {
     setToastMessage({ message: msg, kind });
   }, []);
 
   const persistTemplate = useCallback(() => {
+    previewCanvasRef.current?.commitInlineEdit();
+    const currentBlocks = blocksRef.current;
+    const latestHtml = compileBlocksToHtml(currentBlocks);
     setSaveStatus('saving');
     try {
       const saved = saveTemplateDocument({
         id: documentId,
         name: emailData.headerTitle || 'Meu template',
         subject: emailData.subject || 'E-mail sem assunto',
-        blocks,
-        emailData: { ...emailData, documentId },
+        blocks: currentBlocks,
+        emailData: { ...emailData, customCodeHtml: latestHtml, documentId },
       });
       setDocumentId(saved.id);
       setSavedTemplates(listSavedTemplates());
-      saveDraft(blocks, { ...emailData, documentId: saved.id }, saved.id);
+      saveDraft(currentBlocks, { ...emailData, customCodeHtml: latestHtml, documentId: saved.id }, saved.id);
       setSaveStatus('saved');
       setLastSavedTime(`às ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`);
-      showToast('Template salvo com nova versão.');
+      showToast('Template salvo com sucesso!');
     } catch {
       setSaveStatus('error');
       showToast('Não foi possível salvar o template.', 'error');
     }
-  }, [blocks, documentId, emailData]);
+  }, [documentId, emailData, showToast]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -498,30 +469,46 @@ export const GeradorProScreen: React.FC<GeradorProScreenProps> = ({
     pushToHistory(newBlocks);
   };
 
-  const updateSelectedBlock = (updatedProps: Partial<EmailBlock>) => {
-    const targetId = selectedBlockId;
-    if (!targetId) return;
+  const updateBlock = useCallback(
+    (targetId: string, updatedProps: Partial<EmailBlock>, options?: { coalesce?: boolean }) => {
+      const safeProps = sanitizeBlockPropertyUpdate(updatedProps);
+      if (Object.keys(safeProps).length === 0) return;
 
-    const safeProps = sanitizeBlockPropertyUpdate(updatedProps);
-    if (Object.keys(safeProps).length === 0) return;
+      setBlocks((prevBlocks) => {
+        const index = prevBlocks.findIndex((b) => b.id === targetId);
+        if (index === -1) return prevBlocks;
 
-    const nextBlocks = blocks.map((block) =>
-      block.id === targetId ? { ...block, ...safeProps } : block,
-    );
-    setBlocks(nextBlocks);
-    const coalescibleFields = new Set([
-      'text',
-      'headerTitle',
-      'headerSubtitle',
-      'footerText',
-      'buttonLabel',
-      'buttonUrl',
-      'couponCode',
-      'couponDiscount',
-    ]);
-    const shouldCoalesce = Object.keys(safeProps).some((key) => coalescibleFields.has(key));
-    pushToHistory(nextBlocks, shouldCoalesce ? { coalesce: true } : undefined);
-  };
+        const nextBlocks = [...prevBlocks];
+        nextBlocks[index] = { ...nextBlocks[index], ...safeProps };
+        blocksRef.current = nextBlocks;
+
+        const coalescibleFields = new Set([
+          'text',
+          'headerTitle',
+          'headerSubtitle',
+          'footerText',
+          'buttonLabel',
+          'buttonUrl',
+          'couponCode',
+          'couponDiscount',
+        ]);
+        const shouldCoalesce =
+          options?.coalesce ?? Object.keys(safeProps).some((key) => coalescibleFields.has(key));
+
+        pushToHistory(nextBlocks, shouldCoalesce ? { coalesce: true } : undefined);
+        return nextBlocks;
+      });
+    },
+    [pushToHistory]
+  );
+
+  const updateSelectedBlock = useCallback(
+    (updatedProps: Partial<EmailBlock>) => {
+      if (!selectedBlockId) return;
+      updateBlock(selectedBlockId, updatedProps);
+    },
+    [selectedBlockId, updateBlock]
+  );
 
   const handleSelectTemplate = (template: EmailTemplate) => {
     const safeTemplateHtml = template.customCodeHtml
@@ -847,51 +834,22 @@ export const GeradorProScreen: React.FC<GeradorProScreenProps> = ({
     applyFormattingToSelection('variable', varName);
   };
 
-  const handleInlineBlockDraft = useCallback((blockId: string, field: keyof EmailBlock, value: string) => {
-    setInlineBlockDrafts((prev) => ({
-      ...prev,
-      [blockId]: { ...(prev[blockId] || {}), [field]: value },
-    }));
-  }, []);
+  const handleInlineBlockDraft = useCallback(
+    (blockId: string, field: keyof EmailBlock, value: string) => {
+      updateBlock(blockId, { [field]: value }, { coalesce: true });
+    },
+    [updateBlock]
+  );
 
-  const handleInlineBlockEdit = useCallback((blockId: string, field: keyof EmailBlock, value: string) => {
-    const target = blocks.find((block) => block.id === blockId);
-    if (!target) return;
-    setSelectedBlockId(blockId);
-    updateSelectedBlockForId(blockId, { [field]: value });
-    setInlineBlockDrafts((prev) => {
-      if (!prev[blockId]) return prev;
-      const next = { ...prev };
-      const blockDraft = { ...next[blockId] };
-      delete blockDraft[field];
-      if (Object.keys(blockDraft).length) next[blockId] = blockDraft;
-      else delete next[blockId];
-      return next;
-    });
-  }, [blocks]);
-
-  const updateSelectedBlockForId = (targetId: string, updatedProps: Partial<EmailBlock>) => {
-    const safeProps = sanitizeBlockPropertyUpdate(updatedProps);
-    if (!Object.keys(safeProps).length) return;
-    const nextBlocks = blocks.map((block) => block.id === targetId ? { ...block, ...safeProps } : block);
-    setBlocks(nextBlocks);
-    setInlineBlockDrafts((prev) => {
-      if (!prev[targetId]) return prev;
-      const next = { ...prev };
-      const draft = { ...next[targetId] };
-      Object.keys(safeProps).forEach((key) => delete draft[key as keyof EmailBlock]);
-      if (Object.keys(draft).length) next[targetId] = draft;
-      else delete next[targetId];
-      return next;
-    });
-    const shouldCoalesce = ['text', 'headerTitle', 'headerSubtitle', 'footerText', 'buttonLabel', 'couponCode', 'couponDiscount'].includes(String(Object.keys(safeProps)[0] || ''));
-    pushToHistory(nextBlocks, shouldCoalesce ? { coalesce: true } : undefined);
-  };
+  const handleInlineBlockEdit = useCallback(
+    (blockId: string, field: keyof EmailBlock, value: string) => {
+      setSelectedBlockId(blockId);
+      updateBlock(blockId, { [field]: value }, { coalesce: true });
+    },
+    [updateBlock]
+  );
 
   const selectedBlock = blocks.find((b) => b.id === selectedBlockId) || null;
-  const selectedBlockForPanel = selectedBlock
-    ? { ...selectedBlock, ...(inlineBlockDrafts[selectedBlock.id] || {}) }
-    : null;
 
   return (
     <>
@@ -910,9 +868,26 @@ export const GeradorProScreen: React.FC<GeradorProScreenProps> = ({
         setPreviewDevice={setPreviewDevice}
         lastSavedTime={lastSavedTime}
         onOpenImportModal={() => setIsImportModalOpen(true)}
-        onOpenExportModal={() => setIsExportModalOpen(true)}
-        onNavigateToPreview={() => onNavigate('visualizacao', 'push')}
-        onNavigateHome={() => onNavigate('inicio', 'none')}
+        onOpenExportModal={() => {
+          previewCanvasRef.current?.commitInlineEdit();
+          setIsExportModalOpen(true);
+        }}
+        onNavigateToPreview={() => {
+          previewCanvasRef.current?.commitInlineEdit();
+          const latestHtml = compileBlocksToHtml(blocksRef.current);
+          setEmailData((prev) => ({
+            ...prev,
+            customCodeHtml: latestHtml,
+            contentSource: 'blocks',
+            documentId,
+            subject: prev.subject || prev.headerTitle,
+          }));
+          onNavigate('visualizacao', 'push');
+        }}
+        onNavigateHome={() => {
+          previewCanvasRef.current?.commitInlineEdit();
+          onNavigate('inicio', 'none');
+        }}
         onSave={persistTemplate}
         onOpenTemplates={() => { setSavedTemplates(listSavedTemplates()); setIsTemplateManagerOpen(true); }}
         saveStatus={saveStatus}
@@ -940,16 +915,29 @@ export const GeradorProScreen: React.FC<GeradorProScreenProps> = ({
         {/* Panel B: Center Canvas (The Email Document) */}
         <main className="flex-grow h-full overflow-hidden flex flex-col min-w-0">
           <PreviewCanvas
+            ref={previewCanvasRef}
             compiledHtml={compiledHtml}
             blocks={blocks}
             selectedBlockId={selectedBlockId}
             setSelectedBlockId={setSelectedBlockId}
             onInlineBlockEdit={handleInlineBlockEdit}
             onInlineBlockDraft={handleInlineBlockDraft}
+            onSaveRequested={persistTemplate}
             previewDevice={previewDevice}
             setPreviewDevice={setPreviewDevice}
             iframeHeight={iframeHeight}
-            onExpand={() => onNavigate('visualizacao', 'push')}
+            onExpand={() => {
+              previewCanvasRef.current?.commitInlineEdit();
+              const latestHtml = compileBlocksToHtml(blocksRef.current);
+              setEmailData((prev) => ({
+                ...prev,
+                customCodeHtml: latestHtml,
+                contentSource: 'blocks',
+                documentId,
+                subject: prev.subject || prev.headerTitle,
+              }));
+              onNavigate('visualizacao', 'push');
+            }}
             handleIframeLoad={handleIframeLoad}
             iframeRef={previewIframeRef}
             onMoveUp={handleMoveUp}
@@ -967,7 +955,7 @@ export const GeradorProScreen: React.FC<GeradorProScreenProps> = ({
         {/* Panel C: Right Sidebar (Properties Panel with Collapsible Accordion) */}
         <aside className="w-80 lg:w-88 shrink-0 h-full overflow-hidden hidden lg:flex flex-col z-10 shadow-xs">
           <PropertiesPanel
-            selectedBlock={selectedBlockForPanel}
+            selectedBlock={selectedBlock}
             updateSelectedBlock={updateSelectedBlock}
             applyFormattingToSelection={applyFormattingToSelection}
             insertVariableToSelectedBlock={insertVariableToSelectedBlock}
