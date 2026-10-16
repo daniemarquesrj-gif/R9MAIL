@@ -1,18 +1,17 @@
 import React, { useState } from 'react';
+import { SignOutButton } from '../auth/SignOutButton';
 import {
   Undo2,
   Redo2,
   Monitor,
   Smartphone,
   UploadCloud,
-  Eye,
   Download,
-  Check,
   Edit2,
-  Sparkles,
   ArrowLeft,
   Save,
   FolderOpen,
+  ChevronDown,
 } from 'lucide-react';
 
 interface EditorTopBarProps {
@@ -27,11 +26,11 @@ interface EditorTopBarProps {
   lastSavedTime: string;
   onOpenImportModal: () => void;
   onOpenExportModal: () => void;
-  onNavigateToPreview: () => void;
   onNavigateHome: () => void;
   onSave: () => void;
   onOpenTemplates: () => void;
   saveStatus: 'saved' | 'saving' | 'dirty' | 'error';
+  onSignOut: () => Promise<void>;
 }
 
 export const EditorTopBar: React.FC<EditorTopBarProps> = ({
@@ -46,14 +45,16 @@ export const EditorTopBar: React.FC<EditorTopBarProps> = ({
   lastSavedTime,
   onOpenImportModal,
   onOpenExportModal,
-  onNavigateToPreview,
   onNavigateHome,
   onSave,
   onOpenTemplates,
   saveStatus,
+  onSignOut,
 }) => {
   const [isEditingSubject, setIsEditingSubject] = useState(false);
   const [tempSubject, setTempSubject] = useState(subject);
+  const [isHtmlMenuOpen, setIsHtmlMenuOpen] = useState(false);
+  const [isTemplatesMenuOpen, setIsTemplatesMenuOpen] = useState(false);
 
   const handleSaveSubject = () => {
     setIsEditingSubject(false);
@@ -85,15 +86,6 @@ export const EditorTopBar: React.FC<EditorTopBarProps> = ({
         >
           <ArrowLeft className="w-4 h-4" />
         </button>
-
-        <div className="flex items-center gap-2 pr-2 border-r border-slate-200 shrink-0">
-          <div className="w-7 h-7 rounded-lg bg-gradient-to-tr from-indigo-600 to-blue-500 flex items-center justify-center text-white font-bold text-xs shadow-xs">
-            R9
-          </div>
-          <span className="font-bold text-slate-800 text-sm hidden sm:inline tracking-tight">
-            R9Bot <span className="text-slate-400 font-normal">Mailer</span>
-          </span>
-        </div>
 
         {/* Editable Subject / Campaign Title */}
         <div className="flex items-center gap-1.5 min-w-0 max-w-[200px] sm:max-w-[280px] md:max-w-xs">
@@ -129,7 +121,7 @@ export const EditorTopBar: React.FC<EditorTopBarProps> = ({
         <div className="hidden xl:flex items-center gap-1.5 text-[11px] font-medium pl-1">
           <span className={`w-1.5 h-1.5 rounded-full ${saveStatus === 'saved' ? 'bg-emerald-500' : saveStatus === 'saving' ? 'bg-amber-500 animate-pulse' : saveStatus === 'error' ? 'bg-red-500' : 'bg-slate-400'}`} />
           <span className={saveStatus === 'error' ? 'text-red-500' : 'text-slate-400'}>
-            {saveStatus === 'saved' ? `Salvo ${lastSavedTime}` : saveStatus === 'saving' ? 'Salvando...' : saveStatus === 'error' ? 'Falha ao salvar' : 'Alterações não salvas'}
+            {saveStatus === 'saved' ? `Rascunho salvo na nuvem${lastSavedTime ? ` ${lastSavedTime}` : ''}` : saveStatus === 'saving' ? 'Salvando...' : saveStatus === 'error' ? 'Falha ao salvar' : 'Alterações não salvas'}
           </span>
         </div>
       </div>
@@ -176,10 +168,10 @@ export const EditorTopBar: React.FC<EditorTopBarProps> = ({
                 ? 'bg-white text-indigo-700 shadow-2xs font-semibold'
                 : 'text-slate-600 hover:text-slate-900 cursor-pointer'
             }`}
-            title="Visualização Desktop (600px)"
+            title="Visualização no computador (600px)"
           >
             <Monitor className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Desktop</span>
+            <span className="hidden sm:inline">Computador</span>
           </button>
 
           <button
@@ -190,68 +182,112 @@ export const EditorTopBar: React.FC<EditorTopBarProps> = ({
                 ? 'bg-white text-indigo-700 shadow-2xs font-semibold'
                 : 'text-slate-600 hover:text-slate-900 cursor-pointer'
             }`}
-            title="Visualização Mobile (375px)"
+            title="Visualização no celular (375px)"
           >
             <Smartphone className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Mobile</span>
+            <span className="hidden sm:inline">Celular</span>
           </button>
         </div>
       </div>
 
-      {/* Right: Actions (Import, Preview, Export) */}
+      {/* Right: E-mail management and export/import actions */}
       <div className="flex items-center gap-1.5 sm:gap-2">
-        <button
-          type="button"
-          onClick={onOpenTemplates}
-          className="px-2.5 sm:px-3 py-1.5 text-xs font-semibold text-slate-700 hover:text-slate-900 hover:bg-slate-100 rounded-lg border border-slate-200 transition-all flex items-center gap-1.5 cursor-pointer active:scale-95"
-          title="Abrir meus templates salvos"
-        >
-          <FolderOpen className="w-3.5 h-3.5 text-slate-500" />
-          <span className="hidden lg:inline">Meus templates</span>
-        </button>
+        <div className="relative">
+          <button
+            type="button"
+            onClick={() => { setIsTemplatesMenuOpen((open) => !open); setIsHtmlMenuOpen(false); }}
+            aria-haspopup="menu"
+            aria-expanded={isTemplatesMenuOpen}
+            className="px-2.5 sm:px-3 py-1.5 text-xs font-semibold text-slate-700 hover:text-slate-900 hover:bg-slate-100 rounded-lg border border-slate-200 transition-all flex items-center gap-1.5 cursor-pointer active:scale-95"
+            title="Publicar um modelo ou abrir a biblioteca compartilhada"
+          >
+            <FolderOpen className="w-3.5 h-3.5 text-slate-500" />
+            <span className="hidden sm:inline">Biblioteca</span><span className="sm:hidden">Modelos</span>
+            <ChevronDown className={`w-3.5 h-3.5 transition-transform ${isTemplatesMenuOpen ? 'rotate-180' : ''}`} />
+          </button>
+          {isTemplatesMenuOpen && (
+            <>
+              <button
+                type="button"
+                aria-label="Fechar menu de templates"
+                className="fixed inset-0 z-40 cursor-default"
+                onClick={() => setIsTemplatesMenuOpen(false)}
+              />
+              <div role="menu" className="absolute right-0 top-full mt-2 z-50 w-56 rounded-xl border border-slate-200 bg-white p-1.5 shadow-xl">
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => { setIsTemplatesMenuOpen(false); onSave(); }}
+                  className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm font-medium text-slate-700 hover:bg-indigo-50 hover:text-indigo-700"
+                >
+                  <Save className="h-4 w-4" />
+                  <span><strong className="block text-xs">Salvar template</strong><span className="block text-[10px] font-normal text-slate-500">Publicar na biblioteca compartilhada</span></span>
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => { setIsTemplatesMenuOpen(false); onOpenTemplates(); }}
+                  className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm font-medium text-slate-700 hover:bg-indigo-50 hover:text-indigo-700"
+                >
+                  <FolderOpen className="h-4 w-4" />
+                  <span><strong className="block text-xs">Abrir biblioteca</strong><span className="block text-[10px] font-normal text-slate-500">Consultar e usar modelos da equipe</span></span>
+                </button>
+              </div>
+            </>
+          )}
+        </div>
 
-        <button
-          type="button"
-          onClick={onSave}
-          className="px-2.5 sm:px-3 py-1.5 text-xs font-bold text-indigo-700 hover:bg-indigo-50 rounded-lg border border-indigo-200 transition-all flex items-center gap-1.5 cursor-pointer active:scale-95"
-          title="Salvar template (Ctrl+S)"
-        >
-          <Save className="w-3.5 h-3.5" />
-          <span className="hidden md:inline">Salvar</span>
-        </button>
+        {/* Export is the primary action; importing remains available in the same menu. */}
+        <div className="relative">
+          <button
+            type="button"
+            onClick={() => { setIsHtmlMenuOpen((open) => !open); setIsTemplatesMenuOpen(false); }}
+            aria-haspopup="menu"
+            aria-expanded={isHtmlMenuOpen}
+            className="px-3 sm:px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white text-xs font-bold rounded-lg shadow-xs transition-all flex items-center gap-1.5 cursor-pointer"
+            title="Exportar o e-mail ou importar um HTML existente"
+          >
+            <Download className="w-3.5 h-3.5" />
+            <span>Exportar</span>
+            <ChevronDown className={`w-3.5 h-3.5 transition-transform ${isHtmlMenuOpen ? 'rotate-180' : ''}`} />
+          </button>
+          {isHtmlMenuOpen && (
+            <>
+              <button
+                type="button"
+                aria-label="Fechar menu HTML"
+                className="fixed inset-0 z-40 cursor-default"
+                onClick={() => setIsHtmlMenuOpen(false)}
+              />
+              <div role="menu" className="absolute right-0 top-full mt-2 z-50 w-52 rounded-xl border border-slate-200 bg-white p-1.5 shadow-xl">
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => { setIsHtmlMenuOpen(false); onOpenImportModal(); }}
+                  className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm font-medium text-slate-700 hover:bg-indigo-50 hover:text-indigo-700"
+                >
+                  <UploadCloud className="h-4 w-4" />
+                  <span>Importar HTML</span>
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => { setIsHtmlMenuOpen(false); onOpenExportModal(); }}
+                  className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm font-medium text-slate-700 hover:bg-indigo-50 hover:text-indigo-700"
+                >
+                  <Download className="h-4 w-4" />
+                  <span>Exportar HTML</span>
+                </button>
+              </div>
+            </>
+          )}
+        </div>
 
-        {/* Import HTML */}
-        <button
-          type="button"
-          onClick={onOpenImportModal}
-          className="px-2.5 sm:px-3 py-1.5 text-xs font-semibold text-slate-700 hover:text-slate-900 hover:bg-slate-100 rounded-lg border border-slate-200 transition-all flex items-center gap-1.5 cursor-pointer active:scale-95"
-          title="Importar um arquivo HTML ou colar código"
-        >
-          <UploadCloud className="w-3.5 h-3.5 text-slate-500" />
-          <span className="hidden md:inline">Importar HTML</span>
-        </button>
-
-        {/* Live Preview Fullscreen */}
-        <button
-          type="button"
-          onClick={onNavigateToPreview}
-          className="px-2.5 sm:px-3 py-1.5 text-xs font-semibold text-slate-700 hover:text-slate-900 hover:bg-slate-100 rounded-lg border border-slate-200 transition-all flex items-center gap-1.5 cursor-pointer active:scale-95"
-          title="Visualizar em tela cheia com dados dinâmicos"
-        >
-          <Eye className="w-3.5 h-3.5 text-slate-500" />
-          <span className="hidden md:inline">Visualizar</span>
-        </button>
-
-        {/* Primary Action: Export HTML */}
-        <button
-          type="button"
-          onClick={onOpenExportModal}
-          className="px-3 sm:px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white text-xs font-bold rounded-lg shadow-xs transition-all flex items-center gap-1.5 cursor-pointer"
-          title="Exportar código HTML limpo e baixar arquivo"
-        >
-          <Download className="w-3.5 h-3.5" />
-          <span>Exportar HTML</span>
-        </button>
+        <SignOutButton
+          onSignOut={onSignOut}
+          compactOnMobile
+          className="flex shrink-0 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-600 transition-colors hover:border-red-200 hover:bg-red-50 hover:text-red-700 disabled:cursor-wait disabled:opacity-60 sm:px-3"
+        />
       </div>
     </header>
   );

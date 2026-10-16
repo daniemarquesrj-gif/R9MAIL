@@ -2,8 +2,6 @@ import React, { useState, useEffect, useRef, useImperativeHandle, forwardRef, us
 import { EmailBlock, BlockType } from '../../types';
 import { generateSingleBlockHtml } from '../../utils/compiler';
 import {
-  Monitor,
-  Smartphone,
   ZoomIn,
   ZoomOut,
   Maximize2,
@@ -30,7 +28,6 @@ export interface PreviewCanvasProps {
   onInlineBlockDraft: (blockId: string, field: keyof EmailBlock, value: string) => void;
   onSaveRequested?: () => void;
   previewDevice: 'desktop' | 'mobile';
-  setPreviewDevice: (device: 'desktop' | 'mobile') => void;
   iframeHeight: number;
   onExpand: () => void;
   handleIframeLoad: () => void;
@@ -53,7 +50,6 @@ export const PreviewCanvas = forwardRef<PreviewCanvasHandle, PreviewCanvasProps>
   onInlineBlockDraft,
   onSaveRequested,
   previewDevice,
-  setPreviewDevice,
   iframeHeight,
   onExpand,
   handleIframeLoad,
@@ -73,6 +69,7 @@ export const PreviewCanvas = forwardRef<PreviewCanvasHandle, PreviewCanvasProps>
   const canvasRootRef = useRef<HTMLDivElement | null>(null);
   const workspaceRef = useRef<HTMLDivElement | null>(null);
   const floatingToolbarRef = useRef<HTMLDivElement | null>(null);
+  const inlineFormatToolbarRef = useRef<HTMLDivElement | null>(null);
   const inlineSelectionRef = useRef<{ range: Range; blockId: string; field: keyof EmailBlock; element: HTMLElement } | null>(null);
 
   // Stable references for callbacks to prevent stale closure bugs in iframe event handlers
@@ -184,8 +181,16 @@ export const PreviewCanvas = forwardRef<PreviewCanvasHandle, PreviewCanvasProps>
   useEffect(() => {
     const handleParentMouseDown = (e: MouseEvent) => {
       if (!activeInlineEditorRef.current) return;
-      // If clicking inside the iframe container, let iframe handlers handle it
-      if (iframeRef.current && iframeRef.current.contains(e.target as Node)) return;
+      const target = e.target as Node | null;
+
+      // The floating formatting toolbar lives outside the iframe. Do not commit
+      // the inline edit on its mousedown: committing updates `blocks`, which can
+      // replace the selected iframe element before the toolbar's click handler
+      // restores the saved Range and applies formatting.
+      if (target && inlineFormatToolbarRef.current?.contains(target)) return;
+
+      // If clicking inside the iframe container, let iframe handlers handle it.
+      if (target && iframeRef.current && iframeRef.current.contains(target)) return;
       commitCurrentInlineEdit();
     };
 
@@ -586,38 +591,7 @@ export const PreviewCanvas = forwardRef<PreviewCanvasHandle, PreviewCanvasProps>
   return (
     <div ref={canvasRootRef} className="flex-grow h-full flex flex-col bg-slate-100/75 select-none relative overflow-hidden">
       {/* Canvas Top Controls Toolbar */}
-      <div className="h-11 px-4 border-b border-slate-200/90 bg-white/95 backdrop-blur-xs flex items-center justify-between gap-2 z-20 shrink-0">
-        {/* Device View Indicator */}
-        <div className="flex items-center gap-2">
-          <div className="flex items-center bg-slate-100 p-0.5 rounded-lg border border-slate-200">
-            <button
-              type="button"
-              onClick={() => setPreviewDevice('desktop')}
-              className={`px-2.5 py-1 rounded-md text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
-                previewDevice === 'desktop'
-                  ? 'bg-white text-indigo-700 shadow-2xs font-bold'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              <Monitor className="w-3.5 h-3.5" />
-              <span>Desktop (600px)</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setPreviewDevice('mobile')}
-              className={`px-2.5 py-1 rounded-md text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
-                previewDevice === 'mobile'
-                  ? 'bg-white text-indigo-700 shadow-2xs font-bold'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              <Smartphone className="w-3.5 h-3.5" />
-              <span>Mobile (375px)</span>
-            </button>
-          </div>
-        </div>
-
+      <div className="h-11 px-4 border-b border-slate-200/90 bg-white/95 backdrop-blur-xs flex items-center justify-end gap-2 z-20 shrink-0">
         {/* Zoom & Fullscreen Controls */}
         <div className="flex items-center gap-2">
           <div className="flex items-center bg-slate-100 p-0.5 rounded-lg border border-slate-200 text-xs font-semibold text-slate-700">
@@ -662,6 +636,7 @@ export const PreviewCanvas = forwardRef<PreviewCanvasHandle, PreviewCanvasProps>
           an actively edited canvas field. */}
       {inlineFormatToolbar.visible && (
         <div
+          ref={inlineFormatToolbarRef}
           className="absolute z-40 bg-slate-900 text-white rounded-lg shadow-xl px-1.5 py-1 flex items-center gap-0.5 border border-slate-700"
           style={{ top: inlineFormatToolbar.top, left: inlineFormatToolbar.left }}
           onMouseDown={(e) => e.preventDefault()}
@@ -790,7 +765,7 @@ export const PreviewCanvas = forwardRef<PreviewCanvasHandle, PreviewCanvasProps>
                 className="w-full sm:w-auto px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer"
               >
                 <Sparkles className="w-4 h-4 text-indigo-600" />
-                <span>Escolher Modelo</span>
+                <span>Ver biblioteca compartilhada</span>
               </button>
             </div>
           </div>

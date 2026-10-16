@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { EmailBlock, BlockType, EmailData } from '../../types';
 import { RichTextEditor, RichTextEditorRef } from '../RichTextEditor';
 import { LinkEditorModal } from './LinkEditorModal';
+import { EMAIL_VARIABLES } from '../../utils/sampleData';
 import {
   Settings,
   Type,
@@ -79,10 +80,7 @@ const COLOR_PRESETS = [
   '#d97706', // Amber
   '#e11d48', // Rose
   '#1e293b', // Slate 800
-  '#475569', // Slate 600
   '#ffffff', // White
-  '#f8fafc', // Slate 50
-  '#f1f5f9', // Slate 100
   '#000000', // Black
 ];
 
@@ -265,86 +263,27 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
             </h3>
           </div>
           <p className="text-[11px] text-slate-500 mt-1">
-            Propriedades gerais do documento. Selecione qualquer bloco no canvas para personalizá-lo.
+            Clique em um bloco do e-mail para editá-lo.
           </p>
         </div>
 
         <div className="p-4 space-y-5 flex-grow overflow-y-auto min-h-0">
-          {/* Email subject */}
+          {/* Nome do e-mail: nome exibido ao publicar e localizar o modelo na biblioteca */}
           {emailData && setEmailData && (
             <div className="space-y-1.5">
-              <label className="text-xs font-bold text-slate-700 block">Assunto do E-mail:</label>
-              <input
-                type="text"
-                value={emailData.subject || ''}
-                onChange={(e) => setEmailData((prev) => ({ ...prev, subject: e.target.value }))}
-                placeholder="Ex: Condições especiais de matrícula"
-                className="w-full text-xs p-2.5 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 bg-white"
-              />
-            </div>
-          )}
-
-          {/* Visual email title */}
-          {emailData && setEmailData && (
-            <div className="space-y-1.5">
-              <label className="text-xs font-bold text-slate-700 block">Título visual do e-mail:</label>
+              <label className="text-xs font-bold text-slate-700 block">Nome do e-mail:</label>
               <input
                 type="text"
                 value={emailData.headerTitle || ''}
                 onChange={(e) => setEmailData((prev) => ({ ...prev, headerTitle: e.target.value }))}
-                placeholder="Ex: Sua matrícula começa aqui"
+                placeholder="Ex: Matrícula outubro"
                 className="w-full text-xs p-2.5 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 bg-white"
               />
+              <p className="text-[11px] text-slate-500 leading-relaxed">
+                Serve para você encontrar este e-mail depois. O assunto é editado na barra de cima.
+              </p>
             </div>
           )}
-
-          {/* Primary Color Palette */}
-          {emailData && setEmailData && (
-            <div className="space-y-2">
-              <label className="text-xs font-bold text-slate-700 block">
-                Cor Primária da Marca:
-              </label>
-              <div className="flex items-center gap-2">
-                <input
-                  type="color"
-                  value={emailData.primaryColor || '#003bb3'}
-                  onChange={(e) => setEmailData((prev) => ({ ...prev, primaryColor: e.target.value }))}
-                  className="w-8 h-8 rounded-lg cursor-pointer border border-slate-300 p-0.5"
-                />
-                <input
-                  type="text"
-                  value={emailData.primaryColor || '#003bb3'}
-                  onChange={(e) => setEmailData((prev) => ({ ...prev, primaryColor: e.target.value }))}
-                  className="w-24 text-xs font-mono p-1.5 rounded-lg border border-slate-300 uppercase"
-                />
-              </div>
-
-              {/* Color chips */}
-              <div className="flex items-center gap-1.5 flex-wrap pt-1">
-                {COLOR_PRESETS.slice(0, 8).map((color) => (
-                  <button
-                    key={color}
-                    type="button"
-                    onClick={() => setEmailData((prev) => ({ ...prev, primaryColor: color }))}
-                    className="w-5 h-5 rounded-md border border-slate-300 transition-transform hover:scale-110 cursor-pointer shadow-2xs"
-                    style={{ backgroundColor: color }}
-                    title={color}
-                  />
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Tips Card */}
-          <div className="p-3.5 bg-indigo-50/50 border border-indigo-100 rounded-xl space-y-2">
-            <div className="flex items-center gap-2 text-indigo-700 text-xs font-bold">
-              <Sparkles className="w-3.5 h-3.5" />
-              <span>Dica de Produtividade</span>
-            </div>
-            <p className="text-[11px] text-slate-600 leading-relaxed">
-              Você pode clicar diretamente em qualquer texto ou bloco dentro da visualização para abrir instantaneamente as suas opções de edição.
-            </p>
-          </div>
         </div>
       </div>
     );
@@ -380,9 +319,6 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
             <h3 className="text-xs font-bold text-slate-900 truncate">
               {getBlockTitle(selectedBlock.type)}
             </h3>
-            <span className="text-[10px] text-slate-400 font-mono">
-              ID: {selectedBlock.id}
-            </span>
           </div>
         </div>
 
@@ -427,7 +363,7 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
           >
             <div className="flex items-center gap-2">
               <Type className="w-3.5 h-3.5 text-indigo-600" />
-              <span>1. Conteúdo do Bloco</span>
+              <span>Conteúdo</span>
             </div>
             {openSections.content ? (
               <ChevronDown className="w-4 h-4 text-slate-400" />
@@ -827,6 +763,36 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                   />
                 </div>
               )}
+
+              {/* Personalizar com dados do contato + link no texto */}
+              {selectedBlock.type !== 'divider' && selectedBlock.type !== 'image' && selectedBlock.type !== 'header_image' && selectedBlock.type !== 'social' && (
+                <div className="pt-3 border-t border-slate-100 space-y-3">
+                  <div className="space-y-2">
+                    <label className="font-bold text-slate-700 block">Personalizar com dados do contato:</label>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      {EMAIL_VARIABLES.map((variable) => (
+                        <button
+                          key={variable.key}
+                          type="button"
+                          title={variable.description}
+                          onClick={() => insertVariableToSelectedBlock(variable.tag)}
+                          className="px-2.5 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-md font-mono text-[11px] transition-colors cursor-pointer active:scale-95"
+                        >
+                          + {variable.tag}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleOpenLinkModal}
+                    className="w-full py-2 px-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-lg flex items-center justify-center gap-2 transition-colors cursor-pointer"
+                  >
+                    <Link className="w-3.5 h-3.5 text-indigo-600" />
+                    <span>Inserir / Editar Link no Texto</span>
+                  </button>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -842,7 +808,7 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
           >
             <div className="flex items-center gap-2">
               <Palette className="w-3.5 h-3.5 text-indigo-600" />
-              <span>2. Estilo, Cores & Tipografia</span>
+              <span>Aparência</span>
             </div>
             {openSections.style ? (
               <ChevronDown className="w-4 h-4 text-slate-400" />
@@ -853,15 +819,15 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
 
           {openSections.style && (
             <div className="px-4 pb-4 pt-1 space-y-4 text-xs animate-fadeIn">
-              <div className={`rounded-xl border px-3 py-2.5 ${hasRichTextSelection ? 'border-indigo-200 bg-indigo-50/70' : 'border-slate-200 bg-slate-50/70'}`}>
-                <div className={`flex items-center gap-2 text-[11px] font-bold ${hasRichTextSelection ? 'text-indigo-700' : 'text-slate-600'}`}>
-                  <Type className="w-3.5 h-3.5" />
-                  <span>{hasRichTextSelection ? 'Texto selecionado' : 'Estilo do bloco'}</span>
+              {hasRichTextSelection && (
+                <div className="rounded-xl border border-indigo-200 bg-indigo-50/70 px-3 py-2.5">
+                  <div className="flex items-center gap-2 text-[11px] font-bold text-indigo-700">
+                    <Type className="w-3.5 h-3.5" />
+                    <span>Texto selecionado</span>
+                  </div>
+                  <p className="mt-1 text-[10px] leading-relaxed text-slate-500">Cor, tamanho e formatação serão aplicados somente ao trecho selecionado.</p>
                 </div>
-                <p className="mt-1 text-[10px] leading-relaxed text-slate-500">
-                  {hasRichTextSelection ? 'Cor, tamanho e formatação serão aplicados somente ao trecho selecionado.' : 'Selecione um trecho no editor para aplicar formatação somente a ele.'}
-                </p>
-              </div>
+              )}
 
               {/* Color Customization */}
               {selectedBlock.type !== 'divider' && (
@@ -1024,12 +990,11 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
               {selectedBlock.type !== 'divider' && selectedBlock.type !== 'image' && (
                 <div className="space-y-1.5 pt-2 border-t border-slate-100">
                   <label className="font-bold text-slate-700 block">Alinhamento:</label>
-                  <div className="grid grid-cols-4 gap-1 bg-slate-100 p-1 rounded-lg">
+                  <div className="grid grid-cols-3 gap-1 bg-slate-100 p-1 rounded-lg">
                     {[
                       { align: 'left', icon: <AlignLeft className="w-3.5 h-3.5" />, title: 'Esquerda' },
                       { align: 'center', icon: <AlignCenter className="w-3.5 h-3.5" />, title: 'Centro' },
                       { align: 'right', icon: <AlignRight className="w-3.5 h-3.5" />, title: 'Direita' },
-                      { align: 'justify', icon: <AlignJustify className="w-3.5 h-3.5" />, title: 'Justificado' },
                     ].map((item) => (
                       <button
                         key={item.align}
@@ -1053,7 +1018,7 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
               {selectedBlock.type !== 'divider' && selectedBlock.type !== 'image' && (
                 <div className="space-y-1.5 pt-2 border-t border-slate-100">
                   <label className="font-bold text-slate-700 block">Estilo do Texto:</label>
-                  <div className="grid grid-cols-4 gap-1.5">
+                  <div className="grid grid-cols-3 gap-1.5">
                     <button
                       type="button"
                       onMouseDown={(e) => { e.preventDefault(); activeEditorRef.current?.saveSelection(); }}
@@ -1098,69 +1063,11 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                       <Underline className="w-3.5 h-3.5" />
                       <span>U</span>
                     </button>
-
-                    <button
-                      type="button"
-                      onMouseDown={(e) => { e.preventDefault(); activeEditorRef.current?.saveSelection(); }}
-                      onClick={() => applyFormattingToSelection('strikethrough')}
-                      className={`p-1.5 rounded-lg border text-xs line-through flex items-center justify-center gap-1 transition-all cursor-pointer ${
-                        selectedBlock.isStrikethrough
-                          ? 'bg-indigo-50 border-indigo-500 text-indigo-700'
-                          : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
-                      }`}
-                      title="Tachado"
-                    >
-                      <Strikethrough className="w-3.5 h-3.5" />
-                      <span>S</span>
-                    </button>
                   </div>
                 </div>
               )}
 
-              {/* Font Family Selection */}
-              {selectedBlock.type !== 'divider' && selectedBlock.type !== 'image' && (
-                <div className="space-y-1.5 pt-2 border-t border-slate-100">
-                  <label className="font-bold text-slate-700 block">Fonte Segura para E-mail:</label>
-                  <select
-                    value={selectedBlock.fontFamily || 'Helvetica, Arial, sans-serif'}
-                    onMouseDown={() => activeEditorRef.current?.saveSelection()}
-                    onChange={(e) => applyFontFamily(e.target.value)}
-                    className="w-full p-2 rounded-lg border border-slate-300 text-xs bg-white focus:ring-2 focus:ring-indigo-500/20"
-                  >
-                    {FONT_FAMILIES.map((f) => (
-                      <option key={f.value} value={f.value}>
-                        {f.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-
-        {/* =========================================================================
-            SECTION 3: LAYOUT & ESPAÇAMENTO (Layout & Spacing)
-        ========================================================================= */}
-        <div className="border-b border-slate-100">
-          <button
-            type="button"
-            onClick={() => toggleSection('layout')}
-            className="w-full px-4 py-3 flex items-center justify-between text-xs font-bold text-slate-800 hover:bg-slate-50/80 transition-colors cursor-pointer"
-          >
-            <div className="flex items-center gap-2">
-              <Layout className="w-3.5 h-3.5 text-indigo-600" />
-              <span>3. Layout & Espaçamento</span>
-            </div>
-            {openSections.layout ? (
-              <ChevronDown className="w-4 h-4 text-slate-400" />
-            ) : (
-              <ChevronRight className="w-4 h-4 text-slate-400" />
-            )}
-          </button>
-
-          {openSections.layout && (
-            <div className="px-4 pb-4 pt-1 space-y-4 text-xs animate-fadeIn">
+              {/* Largura do botão: opção mais usada em botões, fica visível */}
               {/* Button Width Mode */}
               {selectedBlock.type === 'button' && (
                 <div className="space-y-1.5">
@@ -1192,6 +1099,23 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                 </div>
               )}
 
+              {/* Mais opções de texto: recolhido por padrão */}
+              {selectedBlock.type !== 'divider' && selectedBlock.type !== 'image' && (
+                <div className="pt-2 border-t border-slate-100">
+                  <button
+                    type="button"
+                    onClick={() => toggleSection('layout')}
+                    className="w-full flex items-center justify-between text-[11px] font-bold text-slate-600 hover:text-slate-900 cursor-pointer"
+                  >
+                    <span>Mais opções de texto</span>
+                    {openSections.layout ? (
+                      <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+                    ) : (
+                      <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
+                    )}
+                  </button>
+                  {openSections.layout && (
+                    <div className="pt-3 space-y-4 animate-fadeIn">
               {/* Line Height (for Text and Title) */}
               {(selectedBlock.type === 'text' || selectedBlock.type === 'title' || selectedBlock.type === 'subtitle') && (
                 <div className="space-y-1.5">
@@ -1241,81 +1165,46 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                   </div>
                 </div>
               )}
-            </div>
-          )}
-        </div>
 
-        {/* =========================================================================
-            SECTION 4: VARIÁVEIS & AVANÇADO (Variables & Links)
-        ========================================================================= */}
-        <div className="border-b border-slate-100">
-          <button
-            type="button"
-            onClick={() => toggleSection('advanced')}
-            className="w-full px-4 py-3 flex items-center justify-between text-xs font-bold text-slate-800 hover:bg-slate-50/80 transition-colors cursor-pointer"
-          >
-            <div className="flex items-center gap-2">
-              <Code2 className="w-3.5 h-3.5 text-indigo-600" />
-              <span>4. Variáveis Dinâmicas & Hiperlinks</span>
-            </div>
-            {openSections.advanced ? (
-              <ChevronDown className="w-4 h-4 text-slate-400" />
-            ) : (
-              <ChevronRight className="w-4 h-4 text-slate-400" />
-            )}
-          </button>
-
-          {openSections.advanced && (
-            <div className="px-4 pb-4 pt-1 space-y-4 text-xs animate-fadeIn">
-              {/* Insert Dynamic Variables */}
-              <div className="space-y-2">
-                <label className="font-bold text-slate-700 block">
-                  Inserir Tags de Personalização:
-                </label>
-                <p className="text-[11px] text-slate-500">
-                  Clique na tag para adicionar ao texto do bloco selecionado:
-                </p>
-                <div className="flex items-center gap-1.5 flex-wrap">
-                  {['{{nome}}', '{{empresa}}', '{{email}}', '{{cidade}}', '{{cupom}}'].map((tag) => (
-                    <button
-                      key={tag}
-                      type="button"
-                      onClick={() => insertVariableToSelectedBlock(tag)}
-                      className="px-2.5 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-md font-mono text-[11px] transition-colors cursor-pointer active:scale-95"
-                    >
-                      + {tag}
-                    </button>
-                  ))}
+              {/* Font Family Selection */}
+              {selectedBlock.type !== 'divider' && selectedBlock.type !== 'image' && (
+                <div className="space-y-1.5 pt-2 border-t border-slate-100">
+                  <label className="font-bold text-slate-700 block">Fonte Segura para E-mail:</label>
+                  <select
+                    value={selectedBlock.fontFamily || 'Helvetica, Arial, sans-serif'}
+                    onMouseDown={() => activeEditorRef.current?.saveSelection()}
+                    onChange={(e) => applyFontFamily(e.target.value)}
+                    className="w-full p-2 rounded-lg border border-slate-300 text-xs bg-white focus:ring-2 focus:ring-indigo-500/20"
+                  >
+                    {FONT_FAMILIES.map((f) => (
+                      <option key={f.value} value={f.value}>
+                        {f.label}
+                      </option>
+                    ))}
+                  </select>
                 </div>
-              </div>
+              )}
 
-              {/* Insert / Edit Hyperlink Button & Modal */}
-              <div className="pt-2 border-t border-slate-100 space-y-2">
-                <label className="font-bold text-slate-700 block">Hiperlinks no Texto:</label>
-                <button
-                  type="button"
-                  onClick={handleOpenLinkModal}
-                  className="w-full py-2 px-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-lg flex items-center justify-center gap-2 transition-colors cursor-pointer"
-                >
-                  <Link className="w-3.5 h-3.5 text-indigo-600" />
-                  <span>Inserir / Editar Link no Texto</span>
-                </button>
-
-                <LinkEditorModal
-                  isOpen={linkModalOpen}
-                  onClose={() => setLinkModalOpen(false)}
-                  linkText={linkText}
-                  setLinkText={setLinkText}
-                  linkUrl={linkUrl}
-                  setLinkUrl={setLinkUrl}
-                  onSaveLink={onSaveLink}
-                  onRemoveLink={onRemoveLink}
-                />
-              </div>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
         </div>
+
       </div>
+
+      <LinkEditorModal
+        isOpen={linkModalOpen}
+        onClose={() => setLinkModalOpen(false)}
+        linkText={linkText}
+        setLinkText={setLinkText}
+        linkUrl={linkUrl}
+        setLinkUrl={setLinkUrl}
+        onSaveLink={onSaveLink}
+        onRemoveLink={onRemoveLink}
+      />
     </div>
   );
 };

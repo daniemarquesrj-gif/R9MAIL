@@ -1,88 +1,62 @@
 import React from 'react';
 import { Screen, TransitionType } from '../types';
+import { Blocks, BookOpen, Home } from 'lucide-react';
+import { SignOutButton } from './auth/SignOutButton';
 
 interface HeaderProps {
   currentScreen: Screen;
   onNavigate: (screen: Screen, transition?: TransitionType) => void;
   subtitle?: string;
+  onOpenLibrary: () => void;
+  onSignOut: () => Promise<void>;
 }
 
-export const Header: React.FC<HeaderProps> = ({ currentScreen, onNavigate, subtitle }) => {
+export const Header: React.FC<HeaderProps> = ({ currentScreen, onNavigate, onOpenLibrary, onSignOut }) => {
+  const items: { label: string; screen: Screen; icon: React.ElementType }[] = [
+    { label: 'Início', screen: 'inicio', icon: Home },
+    { label: 'Editor', screen: 'gerador_pro', icon: Blocks },
+  ];
+
   return (
-    <header className="bg-white border-b border-slate-200 fixed top-0 left-0 right-0 z-50 flex justify-between items-center px-4 md:px-6 h-16 w-full shadow-xs">
-      {/* Branding */}
-      <div 
-        className="flex items-center gap-3 cursor-pointer select-none"
-        onClick={() => onNavigate('inicio', 'none')} aria-current={currentScreen === 'inicio' ? 'page' : undefined}
-      >
-        <img 
-          src="/favicon.svg" 
-          alt="R9 Logo" 
-          className="w-8 h-8 rounded-lg shadow-xs transition-transform hover:scale-105" 
-        />
-        <div className="flex items-baseline gap-2">
-          <span className="text-xl font-bold text-slate-800 tracking-tight">
-            R9Bot <span className="font-light text-slate-500">Mailer</span>
-          </span>
-          {subtitle && (
-            <span className="hidden lg:inline text-xs text-slate-400 font-medium">
-              {subtitle}
-            </span>
-          )}
-        </div>
-      </div>
+    <header className="fixed left-0 right-0 top-0 z-50 flex h-16 w-full items-center justify-between border-b border-slate-200 bg-white px-3 shadow-sm md:px-6">
+      <button type="button" onClick={() => onNavigate('inicio', 'none')} className="flex shrink-0 items-center gap-2.5 rounded-lg text-left focus:outline-none focus:ring-2 focus:ring-blue-500" aria-label="Ir para o início">
+        <img src="/favicon.svg" alt="" className="h-8 w-8 rounded-lg" />
+        <span className="hidden text-lg font-bold tracking-tight text-slate-800 sm:inline">R9Bot <span className="font-normal text-slate-500">Mailer</span></span>
+        <span className="text-lg font-bold tracking-tight text-slate-800 sm:hidden">R9Bot</span>
+      </button>
 
-      {/* Segmented Control Nav */}
-      <nav aria-label="Navegação principal" className="flex items-center space-x-1 sm:space-x-2 bg-slate-100 p-1 rounded-lg border border-slate-200/80 max-w-[58vw] overflow-x-auto no-scrollbar">
+      <nav aria-label="Navegação principal" className="ml-3 flex min-w-0 flex-1 items-center gap-1 overflow-x-auto rounded-xl bg-slate-100 p-1">
+        {items.map(({ label, screen, icon: Icon }) => {
+          const active = currentScreen === screen;
+          return (
+            <button
+              key={screen}
+              type="button"
+              onClick={() => onNavigate(screen, 'none')}
+              aria-current={active ? 'page' : undefined}
+              title={label}
+              className={`flex shrink-0 items-center gap-1.5 rounded-lg px-2.5 py-2 text-xs font-semibold transition-colors sm:px-3 sm:text-sm ${active ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-600 hover:bg-white/70 hover:text-slate-900'}`}
+            >
+              <Icon size={16} />
+              <span>{label}</span>
+            </button>
+          );
+        })}
         <button
-          onClick={() => onNavigate('inicio', 'none')} aria-current={currentScreen === 'inicio' ? 'page' : undefined}
-          className={`px-2.5 sm:px-4 py-1.5 rounded-md text-xs sm:text-sm font-medium transition-all flex items-center gap-1 ${
-            currentScreen === 'inicio'
-              ? 'bg-white text-blue-700 shadow-xs font-semibold'
-              : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
-          }`}
+          type="button"
+          onClick={onOpenLibrary}
+          title="Biblioteca"
+          className="flex shrink-0 items-center gap-1.5 rounded-lg px-2.5 py-2 text-xs font-semibold text-slate-600 transition-colors hover:bg-white/70 hover:text-slate-900 sm:px-3 sm:text-sm"
         >
-          <span className="material-symbols-outlined text-[16px] hidden sm:inline">home</span>
-          <span>Início</span>
-        </button>
-
-        <button
-          onClick={() => onNavigate('editor', 'none')}
-          className={`px-2.5 sm:px-4 py-1.5 rounded-md text-xs sm:text-sm font-medium transition-all ${
-            currentScreen === 'editor'
-              ? 'bg-white text-blue-700 shadow-xs font-semibold'
-              : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
-          }`}
-        >
-          Editor de Código
-        </button>
-
-        <button
-          onClick={() => onNavigate('gerador_pro', 'none')}
-          className={`px-2.5 sm:px-4 py-1.5 rounded-md text-xs sm:text-sm font-medium transition-all flex items-center gap-1 ${
-            currentScreen === 'gerador_pro'
-              ? 'bg-white text-indigo-700 shadow-xs font-bold'
-              : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
-          }`}
-        >
-          <span>Gerador Visual</span>
-          <span className="text-[10px] bg-indigo-100 text-indigo-700 font-extrabold px-1 py-0.2 rounded uppercase">
-            PRO
-          </span>
-        </button>
-
-        <button
-          onClick={() => onNavigate('visualizacao', 'none')}
-          className={`px-2.5 sm:px-4 py-1.5 rounded-md text-xs sm:text-sm font-medium transition-all ${
-            currentScreen === 'visualizacao'
-              ? 'bg-white text-blue-700 shadow-xs font-semibold'
-              : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
-          }`}
-        >
-          Visualização
+          <BookOpen size={16} />
+          <span>Biblioteca</span>
         </button>
       </nav>
 
+      <SignOutButton
+        onSignOut={onSignOut}
+        className="ml-2 flex shrink-0 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-xs font-semibold text-slate-600 transition-colors hover:border-red-200 hover:bg-red-50 hover:text-red-700 disabled:cursor-wait disabled:opacity-60 sm:px-3 sm:text-sm"
+      />
     </header>
   );
 };

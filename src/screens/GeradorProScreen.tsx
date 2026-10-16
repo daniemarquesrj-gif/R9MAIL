@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
-import { EmailData, EmailBlock, BlockType, Screen, TransitionType, EmailTemplate } from '../types';
+import { EmailData, EmailBlock, BlockType, Screen, TransitionType } from '../types';
 import { parseHtmlToBlocks } from '../utils/htmlParser';
 import { normalizeImage } from '../utils/imageNormalizer';
 import { uploadImage, checkImageSize } from '../utils/imageUploader';
@@ -10,8 +10,10 @@ import { RichTextEditorRef } from '../components/RichTextEditor';
 import {
   EditorTopBar,
   ExportModal,
+  PreviewModal,
   ImportModal,
   TemplateManagerModal,
+  SaveTemplateModal,
   BlocksSidebar,
   PropertiesPanel,
   PreviewCanvas,
@@ -24,19 +26,25 @@ import { Toast } from '../components/ui/Toast';
 import { BlockSelectorModal } from '../components/gerador/BlockSelectorModal';
 import { sanitizeBlockPropertyUpdate } from '../data/blockProperties';
 import {
+  createDocumentId,
   listSavedTemplates,
   loadDraft,
+  loadLatestDraft,
   saveDraft,
   saveTemplateDocument,
   restoreTemplateVersion,
   deleteSavedTemplate,
+  getTemplateLibraryContext,
 } from '../utils/templateStore';
-import type { TemplateDocument } from '../utils/templateStore';
+import type { TemplateDocument, TemplateLibraryContext } from '../utils/templateStore';
 
 interface GeradorProScreenProps {
   emailData: EmailData;
   setEmailData: React.Dispatch<React.SetStateAction<EmailData>>;
   onNavigate: (screen: Screen, transition?: TransitionType) => void;
+  openLibraryOnStart?: boolean;
+  onLibraryStartHandled?: () => void;
+  onSignOut: () => Promise<void>;
 }
 
 
@@ -44,33 +52,41 @@ export const GeradorProScreen: React.FC<GeradorProScreenProps> = ({
   emailData,
   setEmailData,
   onNavigate,
+  openLibraryOnStart = false,
+  onLibraryStartHandled,
+  onSignOut,
 }) => {
-  // Initialize the document identity first so drafts can never leak between templates.
-  const [documentId, setDocumentId] = useState<string>(() => emailData.documentId || `template-${Date.now()}`);
-  const [draft] = useState(() => loadDraft(documentId));
+  // Each document has a UUID so the database can enforce stable ownership and draft isolation.
+  const [documentId, setDocumentId] = useState<string>(() => {
+    const candidate = emailData.documentId || '';
+    return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(candidate)
+      ? candidate
+      : '';
+  });
+  const [draftLoadedFor, setDraftLoadedFor] = useState<string | null>(null);
+  // Tracks an existing shared template being edited while the work-in-progress draft remains private and separate.
+  const [editingTemplateId, setEditingTemplateId] = useState<string | null>(null);
   const [blocks, setBlocks] = useState<EmailBlock[]>(() => {
-    if (draft?.blocks?.length) return draft.blocks;
     if (emailData.contentSource === 'html' && emailData.customCodeHtml) {
       const parsed = parseHtmlToBlocks(sanitizeEmailHtml(emailData.customCodeHtml));
       if (parsed && parsed.length > 0) return parsed;
     }
     return DEFAULT_BLOCKS;
   });
-  const [savedTemplates, setSavedTemplates] = useState<TemplateDocument[]>(() => listSavedTemplates());
+  const [savedTemplates, setSavedTemplates] = useState<TemplateDocument[]>([]);
+  const [libraryContext, setLibraryContext] = useState<TemplateLibraryContext | null>(null);
+  const [isLibraryLoading, setIsLibraryLoading] = useState(false);
+  const [libraryLoadError, setLibraryLoadError] = useState<string | null>(null);
   const [isTemplateManagerOpen, setIsTemplateManagerOpen] = useState(false);
+  const [isSaveTemplateModalOpen, setIsSaveTemplateModalOpen] = useState(false);
   const [isMobileBlockSelectorOpen, setIsMobileBlockSelectorOpen] = useState(false);
 
   const [selectedBlockId, setSelectedBlockId] = useState<string | null>(() => blocks[0]?.id || null);
-  useEffect(() => {
-    if (draft?.emailData) {
-      setEmailData((prev) => ({ ...prev, ...draft.emailData, documentId: draft.documentId || prev.documentId }));
-    }
-  }, []);
-
 
   useEffect(() => {
+    if (!documentId) return;
     setEmailData((prev) => ({ ...prev, documentId, contentSource: 'blocks' }));
-  }, []);
+  }, [documentId, setEmailData]);
 
   const previewCanvasRef = useRef<PreviewCanvasHandle | null>(null);
   const blocksRef = useRef<EmailBlock[]>(blocks);
@@ -122,10 +138,11 @@ export const GeradorProScreen: React.FC<GeradorProScreenProps> = ({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [handleUndo, handleRedo]);
 
-  const { saveStatus, setSaveStatus, lastSavedTime, setLastSavedTime } = useDraftAutosave(blocks, emailData, documentId);
+  const { saveStatus, setSaveStatus, lastSavedTime, setLastSavedTime } = useDraftAutosave(blocks, emailData, documentId, 700, draftLoadedFor === documentId, editingTemplateId);
 
   // Modals state
   const [isExportModalOpen, setIsExportModalOpen] = useState<boolean>(false);
+  const [isPreviewModalOpen, setIsPreviewModalOpen] = useState<boolean>(false);
   const [isImportModalOpen, setIsImportModalOpen] = useState<boolean>(false);
   const [linkModalOpen, setLinkModalOpen] = useState<boolean>(false);
   const [linkText, setLinkText] = useState<string>('');
@@ -180,11 +197,12 @@ export const GeradorProScreen: React.FC<GeradorProScreenProps> = ({
     }
   }, []);
 
-  // Continuously sync compiled HTML to emailData for external screens (e.g. VisualizacaoScreen)
+  // Mantém o HTML compilado em emailData (usado ao salvar e ao reabrir o e-mail)
   useEffect(() => {
     localCompiledHtmlRef.current = compiledHtml;
+    if (!documentId) return;
     setEmailData((prev) => {
-      if (prev.customCodeHtml === compiledHtml) return prev;
+      if (prev.customCodeHtml === compiledHtml && prev.documentId === documentId && prev.contentSource === 'blocks') return prev;
       return {
         ...prev,
         customCodeHtml: compiledHtml,
@@ -199,41 +217,183 @@ export const GeradorProScreen: React.FC<GeradorProScreenProps> = ({
     setToastMessage({ message: msg, kind });
   }, []);
 
-  const persistTemplate = useCallback(() => {
+  useEffect(() => {
+    if (documentId) return;
+    let active = true;
+    // On a fresh page load, recover the most recently edited cloud draft unless the user explicitly chose a new template.
+    loadLatestDraft().then((draft) => {
+      if (!active) return;
+      setDocumentId(draft?.documentId || createDocumentId());
+    }).catch(() => {
+      if (!active) return;
+      setDocumentId(createDocumentId());
+      showToast('Não foi possível localizar rascunhos anteriores na nuvem. O editor iniciará um novo rascunho.', 'error');
+    });
+    return () => { active = false; };
+  }, [documentId, showToast]);
+
+  useEffect(() => {
+    if (!documentId) return;
+    let active = true;
+    setDraftLoadedFor(null);
+    loadDraft(documentId).then((draft) => {
+      if (!active) return;
+      if (draft) {
+        setEditingTemplateId(draft.sourceTemplateId || null);
+        setBlocks(draft.blocks);
+        blocksRef.current = draft.blocks;
+        setSelectedBlockId(draft.blocks[0]?.id || null);
+        setEmailData((prev) => ({ ...prev, ...draft.emailData, documentId, contentSource: 'blocks' }));
+        resetHistory(draft.blocks);
+      }
+      setDraftLoadedFor(documentId);
+    }).catch(() => {
+      if (!active) return;
+      // Let the editor recover, but the autosave status will show a cloud-write failure if persistence is unavailable.
+      setDraftLoadedFor(documentId);
+      showToast('Não foi possível carregar o rascunho da nuvem. Confira a conexão e a migração do Supabase.', 'error');
+    });
+    return () => { active = false; };
+  }, [documentId, setEmailData, resetHistory, showToast]);
+
+  const refreshTemplateLibrary = useCallback(async () => {
+    setIsLibraryLoading(true);
+    setLibraryLoadError(null);
+    try {
+      const [templates, context] = await Promise.all([
+        listSavedTemplates(),
+        getTemplateLibraryContext(),
+      ]);
+      setSavedTemplates(templates);
+      setLibraryContext(context);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Não foi possível carregar a biblioteca.';
+      setLibraryLoadError(message);
+      showToast(message, 'error');
+      throw error;
+    } finally {
+      setIsLibraryLoading(false);
+    }
+  }, [showToast]);
+
+  const openTemplateLibrary = useCallback(async () => {
+    setIsTemplateManagerOpen(true);
+    try {
+      await refreshTemplateLibrary();
+    } catch {
+      // The modal remains open and presents an empty/error toast so the user can retry.
+    }
+  }, [refreshTemplateLibrary]);
+
+  useEffect(() => {
+    if (!openLibraryOnStart || !documentId || draftLoadedFor !== documentId) return;
+    onLibraryStartHandled?.();
+    void openTemplateLibrary();
+  }, [openLibraryOnStart, documentId, draftLoadedFor, onLibraryStartHandled, openTemplateLibrary]);
+
+  const saveCurrentDraftNow = useCallback(async () => {
     previewCanvasRef.current?.commitInlineEdit();
+    await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
     const currentBlocks = blocksRef.current;
     const latestHtml = compileBlocksToHtml(currentBlocks);
+    await saveDraft(currentBlocks, { ...emailData, customCodeHtml: latestHtml, documentId, contentSource: 'blocks' }, documentId, editingTemplateId);
+  }, [documentId, emailData, editingTemplateId]);
+
+  const handleSignOutFromEditor = useCallback(async () => {
+    // Flush the current document before unmounting the editor so the autosave timer cannot be lost.
+    try {
+      await saveCurrentDraftNow();
+    } catch (reason) {
+      const detail = reason instanceof Error ? reason.message : 'Falha desconhecida ao salvar.';
+      throw new Error(`Não foi possível salvar o rascunho antes de sair. Confira a conexão e tente novamente. Detalhe: ${detail}`);
+    }
+    await onSignOut();
+  }, [onSignOut, saveCurrentDraftNow]);
+
+  const navigateHomeAfterSave = useCallback(async () => {
+    try {
+      await saveCurrentDraftNow();
+      onNavigate('inicio', 'none');
+    } catch {
+      showToast('Não foi possível salvar o rascunho na nuvem. Verifique a conexão antes de sair do editor.', 'error');
+    }
+  }, [onNavigate, saveCurrentDraftNow, showToast]);
+
+  const openSaveTemplateModal = useCallback(() => {
+    previewCanvasRef.current?.commitInlineEdit();
+    setIsSaveTemplateModalOpen(true);
+  }, []);
+
+  const persistTemplate = useCallback(async (name: string, description: string): Promise<boolean> => {
+    const normalizedName = name.trim();
+    const normalizedDescription = description.trim();
+    if (!normalizedName || !normalizedDescription) {
+      showToast('Informe o nome e a descrição para publicar o modelo.', 'error');
+      return false;
+    }
+
+    previewCanvasRef.current?.commitInlineEdit();
+    await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
+    const currentBlocks = blocksRef.current;
+    const latestHtml = compileBlocksToHtml(currentBlocks);
+    const dataToSave = { ...emailData, customCodeHtml: latestHtml, documentId, contentSource: 'blocks' as const };
     setSaveStatus('saving');
     try {
-      const saved = saveTemplateDocument({
-        id: documentId,
-        name: emailData.headerTitle || 'Meu template',
+      // Publish the shared template first. A separate private-draft failure must not
+      // prevent the primary action the user explicitly requested from succeeding.
+      const saved = await saveTemplateDocument({
+        id: editingTemplateId || createDocumentId(),
+        name: normalizedName,
+        description: normalizedDescription,
         subject: emailData.subject || 'E-mail sem assunto',
         blocks: currentBlocks,
-        emailData: { ...emailData, customCodeHtml: latestHtml, documentId },
+        emailData: dataToSave,
       });
-      setDocumentId(saved.id);
-      setSavedTemplates(listSavedTemplates());
-      saveDraft(currentBlocks, { ...emailData, customCodeHtml: latestHtml, documentId: saved.id }, saved.id);
-      setSaveStatus('saved');
-      setLastSavedTime(`às ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`);
-      showToast('Template salvo com sucesso!');
-    } catch {
+      setEditingTemplateId(saved.id);
+
+      let draftSaveError: unknown = null;
+      try {
+        await saveDraft(currentBlocks, dataToSave, documentId, saved.id);
+      } catch (error) {
+        draftSaveError = error;
+      }
+
+      const savedAt = `às ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+      setLastSavedTime(savedAt);
+      if (draftSaveError) {
+        setSaveStatus('error');
+        const detail = draftSaveError instanceof Error ? ` Detalhe: ${draftSaveError.message}` : '';
+        showToast(`O modelo foi publicado, mas o rascunho privado não foi salvo na nuvem.${detail}`, 'error');
+      } else {
+        setSaveStatus('saved');
+        showToast('Modelo publicado na biblioteca compartilhada.');
+      }
+      try {
+        await refreshTemplateLibrary();
+      } catch {
+        // Publishing already succeeded; refresh reports its own error separately.
+      }
+      return true;
+    } catch (error) {
+      // Let the modal show the actual Supabase/database error instead of hiding it
+      // behind a generic publication message. This is essential for diagnosing RLS,
+      // schema-cache, session, and network failures.
       setSaveStatus('error');
-      showToast('Não foi possível salvar o template.', 'error');
+      if (error instanceof Error) throw error;
+      throw new Error('Falha desconhecida ao publicar o modelo. Confira a conexão e o console do navegador.');
     }
-  }, [documentId, emailData, showToast]);
+  }, [documentId, editingTemplateId, emailData, refreshTemplateLibrary, showToast, setSaveStatus, setLastSavedTime]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
         event.preventDefault();
-        persistTemplate();
+        if (!isSaveTemplateModalOpen) openSaveTemplateModal();
       }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [persistTemplate]);
+  }, [isSaveTemplateModalOpen, openSaveTemplateModal]);
 
   useEffect(() => {
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
@@ -246,35 +406,81 @@ export const GeradorProScreen: React.FC<GeradorProScreenProps> = ({
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, [saveStatus]);
 
-  const handleLoadSavedTemplate = (template: TemplateDocument) => {
+  const prepareTemplateBlocks = (template: TemplateDocument): EmailBlock[] => {
     const safeHtml = sanitizeEmailHtml(template.emailData.customCodeHtml || '');
     const parsed = template.blocks?.length ? template.blocks : parseHtmlToBlocks(safeHtml);
-    if (!parsed?.length) {
-      showToast('Não foi possível reconstruir este template.', 'error');
+    return Array.isArray(parsed) ? parsed : [];
+  };
+
+  const handleLoadSavedTemplate = (template: TemplateDocument) => {
+    const safeHtml = sanitizeEmailHtml(template.emailData.customCodeHtml || '');
+    const parsed = prepareTemplateBlocks(template);
+    if (!parsed.length) {
+      showToast('Não foi possível reconstruir este modelo.', 'error');
       return;
     }
-    setDocumentId(template.id);
+    const workingDraftId = createDocumentId();
+    setDocumentId(workingDraftId);
+    setEditingTemplateId(template.id);
     setBlocks(parsed);
+    blocksRef.current = parsed;
     setSelectedBlockId(parsed[0]?.id || null);
-    setEmailData({ ...template.emailData, customCodeHtml: safeHtml, documentId: template.id, contentSource: 'blocks', subject: template.subject });
+    setEmailData({ ...template.emailData, customCodeHtml: safeHtml, documentId: workingDraftId, contentSource: 'blocks', subject: template.subject });
     resetHistory(parsed);
     setIsTemplateManagerOpen(false);
     setSaveStatus('saved');
-    showToast(`Template \"${template.name}\" carregado.`);
+    showToast(`Editando o modelo "${template.name}".`);
   };
 
-  const handleDeleteSavedTemplate = (id: string) => {
-    deleteSavedTemplate(id);
-    setSavedTemplates(listSavedTemplates());
-    showToast('Template removido.');
+  const handleUseTemplate = (template: TemplateDocument) => {
+    const safeHtml = sanitizeEmailHtml(template.emailData.customCodeHtml || '');
+    const parsed = prepareTemplateBlocks(template);
+    if (!parsed.length) {
+      showToast('Não foi possível reconstruir este modelo.', 'error');
+      return;
+    }
+    const newDocumentId = createDocumentId();
+    const copiedBlocks = JSON.parse(JSON.stringify(parsed)) as EmailBlock[];
+    const copiedEmailData = {
+      ...template.emailData,
+      documentId: newDocumentId,
+      contentSource: 'blocks' as const,
+      subject: template.subject,
+      customCodeHtml: safeHtml,
+    };
+    setDocumentId(newDocumentId);
+    setEditingTemplateId(null);
+    setBlocks(copiedBlocks);
+    blocksRef.current = copiedBlocks;
+    setSelectedBlockId(copiedBlocks[0]?.id || null);
+    setEmailData(copiedEmailData);
+    resetHistory(copiedBlocks);
+    setIsTemplateManagerOpen(false);
+    showToast(`Cópia de "${template.name}" criada. O original permanece intacto.`);
   };
 
-  const handleRestoreVersion = (templateId: string, versionId: string) => {
-    const restored = restoreTemplateVersion(templateId, versionId);
-    if (restored) {
-      setSavedTemplates(listSavedTemplates());
-      handleLoadSavedTemplate(restored);
-      showToast('Versão restaurada.');
+  const handleDeleteSavedTemplate = async (id: string) => {
+    try {
+      await deleteSavedTemplate(id);
+      await refreshTemplateLibrary();
+      showToast('Modelo excluído da biblioteca.');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Não foi possível excluir o modelo.';
+      showToast(message, 'error');
+    }
+  };
+
+  const handleRestoreVersion = async (templateId: string, versionId: string) => {
+    try {
+      const restored = await restoreTemplateVersion(templateId, versionId);
+      if (restored) {
+        await refreshTemplateLibrary();
+        handleLoadSavedTemplate(restored);
+        showToast('Versão restaurada como a versão atual.');
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Não foi possível restaurar a versão.';
+      showToast(message, 'error');
     }
   };
 
@@ -510,46 +716,14 @@ export const GeradorProScreen: React.FC<GeradorProScreenProps> = ({
     [selectedBlockId, updateBlock]
   );
 
-  const handleSelectTemplate = (template: EmailTemplate) => {
-    const safeTemplateHtml = template.customCodeHtml
-      ? sanitizeEmailHtml(template.customCodeHtml)
-      : undefined;
-
-    setEmailData((prev) => ({
-      ...prev,
-      activeTemplateId: template.id,
-      headerTitle: template.headerTitle || prev.headerTitle,
-      greeting: template.greeting || prev.greeting,
-      buttonText: template.buttonText || prev.buttonText,
-      buttonUrl: template.buttonUrl || prev.buttonUrl,
-      bodyText: template.bodyText || prev.bodyText,
-      footerText: template.footerText || prev.footerText,
-      primaryColor: template.primaryColor || prev.primaryColor,
-      customCodeHtml: safeTemplateHtml,
-      contentSource: 'blocks',
-    }));
-
-    if (safeTemplateHtml) {
-      const parsed = parseHtmlToBlocks(safeTemplateHtml);
-      if (parsed && parsed.length > 0) {
-        setBlocks(parsed);
-        setSelectedBlockId(parsed[0].id);
-        pushToHistory(parsed);
-        showToast(`✓ Modelo "${template.name}" carregado com sucesso!`);
-        return;
-      }
-    }
-    showToast(`✓ Modelo "${template.name}" carregado!`);
-  };
-
-  const handleImportHtmlContent = (rawHtml: string) => {
+  const handleImportHtmlContent = (rawHtml: string, parsedBlocks: EmailBlock[]) => {
     const safeHtml = sanitizeEmailHtml(rawHtml);
     setEmailData((prev) => ({
       ...prev,
       customCodeHtml: safeHtml,
       contentSource: 'blocks',
     }));
-    const parsed = parseHtmlToBlocks(safeHtml);
+    const parsed = parsedBlocks?.length ? parsedBlocks : parseHtmlToBlocks(safeHtml);
     if (parsed && parsed.length > 0) {
       setBlocks(parsed);
       setSelectedBlockId(parsed[0].id);
@@ -851,10 +1025,20 @@ export const GeradorProScreen: React.FC<GeradorProScreenProps> = ({
 
   const selectedBlock = blocks.find((b) => b.id === selectedBlockId) || null;
 
+  if (!documentId || draftLoadedFor !== documentId) {
+    return (
+      <div className="h-full w-full flex flex-col items-center justify-center gap-3 bg-slate-50 text-slate-500">
+        <div className="w-8 h-8 rounded-full border-2 border-indigo-200 border-t-indigo-600 animate-spin" />
+        <p className="text-sm font-medium">Carregando seu rascunho da nuvem…</p>
+        <p className="text-xs">O editor será liberado assim que o conteúdo for recuperado.</p>
+      </div>
+    );
+  }
+
   return (
     <>
       {toastMessage && <Toast message={toastMessage.message} kind={toastMessage.kind} onClose={() => setToastMessage(null)} />}
-    <div className="flex flex-col pt-16 h-full w-full overflow-hidden bg-slate-100 font-sans">
+    <div className="flex flex-col h-full w-full overflow-hidden bg-slate-100 font-sans">
 
       {/* Modern Fixed Top Bar */}
       <EditorTopBar
@@ -872,30 +1056,16 @@ export const GeradorProScreen: React.FC<GeradorProScreenProps> = ({
           previewCanvasRef.current?.commitInlineEdit();
           setIsExportModalOpen(true);
         }}
-        onNavigateToPreview={() => {
-          previewCanvasRef.current?.commitInlineEdit();
-          const latestHtml = compileBlocksToHtml(blocksRef.current);
-          setEmailData((prev) => ({
-            ...prev,
-            customCodeHtml: latestHtml,
-            contentSource: 'blocks',
-            documentId,
-            subject: prev.subject || prev.headerTitle,
-          }));
-          onNavigate('visualizacao', 'push');
-        }}
-        onNavigateHome={() => {
-          previewCanvasRef.current?.commitInlineEdit();
-          onNavigate('inicio', 'none');
-        }}
-        onSave={persistTemplate}
-        onOpenTemplates={() => { setSavedTemplates(listSavedTemplates()); setIsTemplateManagerOpen(true); }}
+        onNavigateHome={() => { void navigateHomeAfterSave(); }}
+        onSave={openSaveTemplateModal}
+        onOpenTemplates={() => { void openTemplateLibrary(); }}
         saveStatus={saveStatus}
+        onSignOut={handleSignOutFromEditor}
       />
 
       {/* Main SaaS Workspace with 3 Distinct Panels */}
       <div className="flex-grow flex overflow-hidden w-full relative">
-        {/* Panel A: Left Sidebar (Blocks, Layers & Templates) */}
+        {/* Panel A: Lista de blocos */}
         <aside className="w-72 lg:w-80 shrink-0 h-full overflow-hidden hidden md:flex flex-col z-10 shadow-xs">
           <BlocksSidebar
             blocks={blocks}
@@ -903,12 +1073,6 @@ export const GeradorProScreen: React.FC<GeradorProScreenProps> = ({
             setSelectedBlockId={setSelectedBlockId}
             onAddBlock={handleAddBlock}
             onReorder={handleReorder}
-            onMoveUp={handleMoveUp}
-            onMoveDown={handleMoveDown}
-            onDuplicate={handleDuplicate}
-            onDelete={handleDelete}
-            onSelectTemplate={handleSelectTemplate}
-            activeTemplateId={emailData.activeTemplateId}
           />
         </aside>
 
@@ -922,21 +1086,12 @@ export const GeradorProScreen: React.FC<GeradorProScreenProps> = ({
             setSelectedBlockId={setSelectedBlockId}
             onInlineBlockEdit={handleInlineBlockEdit}
             onInlineBlockDraft={handleInlineBlockDraft}
-            onSaveRequested={persistTemplate}
+            onSaveRequested={openSaveTemplateModal}
             previewDevice={previewDevice}
-            setPreviewDevice={setPreviewDevice}
             iframeHeight={iframeHeight}
             onExpand={() => {
               previewCanvasRef.current?.commitInlineEdit();
-              const latestHtml = compileBlocksToHtml(blocksRef.current);
-              setEmailData((prev) => ({
-                ...prev,
-                customCodeHtml: latestHtml,
-                contentSource: 'blocks',
-                documentId,
-                subject: prev.subject || prev.headerTitle,
-              }));
-              onNavigate('visualizacao', 'push');
+              setIsPreviewModalOpen(true);
             }}
             handleIframeLoad={handleIframeLoad}
             iframeRef={previewIframeRef}
@@ -945,9 +1100,7 @@ export const GeradorProScreen: React.FC<GeradorProScreenProps> = ({
             onDuplicate={handleDuplicate}
             onDelete={handleDelete}
             onAddBlock={handleAddBlock}
-            onOpenTemplates={() => {
-              // Switches to templates view in sidebar
-            }}
+            onOpenTemplates={() => { void openTemplateLibrary(); }}
             onOpenBlockSelector={() => setIsMobileBlockSelectorOpen(true)}
           />
         </main>
@@ -999,6 +1152,14 @@ export const GeradorProScreen: React.FC<GeradorProScreenProps> = ({
         }}
       />
 
+      {/* Visualização em janela (antes era uma tela separada) */}
+      <PreviewModal
+        isOpen={isPreviewModalOpen}
+        onClose={() => setIsPreviewModalOpen(false)}
+        html={transportHtml}
+        device={previewDevice}
+      />
+
       {/* Export HTML Modal */}
       <ExportModal
         isOpen={isExportModalOpen}
@@ -1016,13 +1177,27 @@ export const GeradorProScreen: React.FC<GeradorProScreenProps> = ({
         onShowToast={showToast}
       />
 
+      <SaveTemplateModal
+        isOpen={isSaveTemplateModalOpen}
+        initialName={editingTemplateId ? (savedTemplates.find((item) => item.id === editingTemplateId)?.name || '') : ''}
+        initialDescription={editingTemplateId ? (savedTemplates.find((item) => item.id === editingTemplateId)?.description || '') : ''}
+        onClose={() => setIsSaveTemplateModalOpen(false)}
+        onSubmit={persistTemplate}
+      />
+
       <TemplateManagerModal
         isOpen={isTemplateManagerOpen}
         templates={savedTemplates}
+        currentUserId={libraryContext?.userId || ''}
+        isAdmin={libraryContext?.isAdmin === true}
+        isLoading={isLibraryLoading}
+        loadError={libraryLoadError}
+        onRetry={() => { void refreshTemplateLibrary().catch(() => {}); }}
         onClose={() => setIsTemplateManagerOpen(false)}
-        onLoad={handleLoadSavedTemplate}
-        onDelete={handleDeleteSavedTemplate}
-        onRestoreVersion={handleRestoreVersion}
+        onUse={handleUseTemplate}
+        onEdit={handleLoadSavedTemplate}
+        onDelete={(id) => { void handleDeleteSavedTemplate(id); }}
+        onRestoreVersion={(templateId, versionId) => { void handleRestoreVersion(templateId, versionId); }}
       />
     </div>
     </>

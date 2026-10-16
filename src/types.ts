@@ -1,4 +1,4 @@
-export type Screen = 'inicio' | 'editor' | 'visualizacao' | 'gerador_pro';
+export type Screen = 'inicio' | 'gerador_pro';
 
 export type TransitionType = 'none' | 'push' | 'push_back';
 

@@ -1,11 +1,9 @@
 import React, { useState } from 'react';
-import { EmailBlock, BlockType, EmailTemplate } from '../../types';
-import { DEFAULT_TEMPLATES } from '../../data/templates';
+import { EmailBlock, BlockType } from '../../types';
 import { BlockSelectorModal } from './BlockSelectorModal';
 import {
   PlusCircle,
   Layers,
-  Sparkles,
   Heading,
   Type,
   AlignLeft,
@@ -16,13 +14,6 @@ import {
   Share2,
   PanelBottom,
   GripVertical,
-  ChevronUp,
-  ChevronDown,
-  Copy,
-  Trash2,
-  Search,
-  Check,
-  AlertTriangle,
 } from 'lucide-react';
 
 interface BlocksSidebarProps {
@@ -31,12 +22,6 @@ interface BlocksSidebarProps {
   setSelectedBlockId: (id: string) => void;
   onAddBlock: (type: BlockType, insertAfterIndex?: number) => void;
   onReorder: (fromIndex: number, toIndex: number) => void;
-  onMoveUp: (index: number) => void;
-  onMoveDown: (index: number) => void;
-  onDuplicate: (block: EmailBlock) => void;
-  onDelete: (id: string) => void;
-  onSelectTemplate: (template: EmailTemplate) => void;
-  activeTemplateId?: string;
 }
 
 interface BlockDefinition {
@@ -137,49 +122,12 @@ export const BlocksSidebar: React.FC<BlocksSidebarProps> = ({
   setSelectedBlockId,
   onAddBlock,
   onReorder,
-  onMoveUp,
-  onMoveDown,
-  onDuplicate,
-  onDelete,
-  onSelectTemplate,
-  activeTemplateId,
 }) => {
-  const [activeTab, setActiveTab] = useState<'layers' | 'templates'>('layers');
   const [isAddBlockModalOpen, setIsAddBlockModalOpen] = useState(false);
-  const [templateConfirm, setTemplateConfirm] = useState<EmailTemplate | null>(null);
 
   // Drag and drop state for layers list
   const [draggedIdx, setDraggedIdx] = useState<number | null>(null);
   const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
-
-  // Helper to extract preview text for a block in the layers list
-  const getBlockSummary = (block: EmailBlock) => {
-    switch (block.type) {
-      case 'header_text':
-      case 'header':
-        return block.headerTitle?.split('\n')[0] || 'Cabeçalho';
-      case 'title':
-        return block.text || 'Título sem texto';
-      case 'subtitle':
-        return block.text || 'Subtítulo';
-      case 'text':
-        return block.text?.replace(/<[^>]*>?/gm, '').substring(0, 30) || 'Texto do parágrafo';
-      case 'button':
-        return block.buttonLabel || 'Botão CTA';
-      case 'image':
-        return block.imageAlt || 'Banner / Imagem';
-      case 'coupon':
-        return block.couponCode ? `Cupom: ${block.couponCode}` : 'Cupom de oferta';
-      case 'divider':
-        return 'Linha divisória';
-      case 'social':
-        return 'Ícones de Redes Sociais';
-      case 'footer':
-        return 'Rodapé do e-mail';
-      default:
-        return block.type;
-    }
-  };
 
   return (
     <div className="w-full h-full flex flex-col bg-white border-r border-slate-200/90 select-none relative">
@@ -193,45 +141,13 @@ export const BlocksSidebar: React.FC<BlocksSidebarProps> = ({
         }}
       />
 
-      {/* Sidebar Navigation Tabs */}
-      <div className="p-2 border-b border-slate-200/80 bg-slate-50/70 shrink-0">
-        <div className="grid grid-cols-2 gap-1 bg-slate-200/70 p-1 rounded-xl">
-          <button
-            type="button"
-            onClick={() => setActiveTab('layers')}
-            className={`py-1.5 px-2 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
-              activeTab === 'layers'
-                ? 'bg-white text-indigo-700 shadow-2xs font-bold'
-                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100/50'
-            }`}
-          >
-            <Layers className="w-3.5 h-3.5" />
-            <span className="flex items-center gap-1">
-              <span>Camadas</span>
-              <span className="text-[10px] bg-slate-200 text-slate-700 px-1.5 py-0.2 rounded-full font-bold">
-                {blocks.length}
-              </span>
-            </span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setActiveTab('templates')}
-            className={`py-1.5 px-2 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
-              activeTab === 'templates'
-                ? 'bg-white text-indigo-700 shadow-2xs font-bold'
-                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100/50'
-            }`}
-          >
-            <Sparkles className="w-3.5 h-3.5" />
-            <span>Modelos</span>
-          </button>
-        </div>
+      {/* Sidebar title */}
+      <div className="px-3 py-2.5 bg-slate-50/80 border-b border-slate-200/80 flex items-center justify-between text-xs text-slate-500 shrink-0">
+        <span className="font-semibold text-slate-700">Blocos ({blocks.length})</span>
+        <span className="text-[11px] text-slate-400">Arraste para reordenar</span>
       </div>
 
-      {/* Tab: Layers / Structure */}
-      {activeTab === 'layers' && (
-        <div className="flex-grow flex flex-col min-h-0 overflow-hidden">
+      <div className="flex-grow flex flex-col min-h-0 overflow-hidden">
           {/* Prominent Action Button to Open Floating Block Menu */}
           <div className="p-3 border-b border-slate-200/80 bg-white shrink-0">
             <button
@@ -242,12 +158,6 @@ export const BlocksSidebar: React.FC<BlocksSidebarProps> = ({
               <PlusCircle className="w-4 h-4" />
               <span>Adicionar Bloco</span>
             </button>
-          </div>
-
-          {/* Subheader: Order & Count matching user screenshot */}
-          <div className="px-3 py-2 bg-slate-50/80 border-b border-slate-200/80 flex items-center justify-between text-xs text-slate-500 shrink-0">
-            <span className="font-semibold text-slate-700">Ordem dos Blocos ({blocks.length})</span>
-            <span className="text-[11px] text-slate-400">Arraste para reordenar</span>
           </div>
 
           <div className="flex-grow overflow-y-auto p-3 space-y-2 min-h-0">
@@ -316,77 +226,14 @@ export const BlocksSidebar: React.FC<BlocksSidebarProps> = ({
                           : 'bg-white hover:bg-slate-50 border-slate-200/90'
                       }`}
                     >
-                      {/* Drag Handle & Icon */}
+                      {/* A lista serve apenas para selecionar e arrastar os blocos. */}
                       <div className="flex items-center gap-2 min-w-0 flex-grow">
-                        <div className="text-slate-400 group-hover:text-slate-600 cursor-grab active:cursor-grabbing">
+                        <div className="text-slate-400 group-hover:text-slate-600 cursor-grab active:cursor-grabbing shrink-0">
                           <GripVertical className="w-3.5 h-3.5" />
                         </div>
-
-                        <div className="w-6 h-6 rounded-md bg-slate-100 flex items-center justify-center shrink-0">
-                          {def?.icon || <Layers className="w-3 h-3 text-slate-500" />}
-                        </div>
-
-                        <div className="min-w-0 flex-grow">
-                          <p className={`text-xs font-semibold truncate ${isSelected ? 'text-indigo-950 font-bold' : 'text-slate-800'}`}>
-                            {def?.name || block.type}
-                          </p>
-                          <p className="text-[10px] text-slate-400 truncate">
-                            {getBlockSummary(block)}
-                          </p>
-                        </div>
-                      </div>
-
-                      {/* Quick Layer Controls on Hover / Selected */}
-                      <div className="flex items-center gap-0.5 opacity-80 group-hover:opacity-100 transition-opacity">
-                        <button
-                          type="button"
-                          disabled={idx === 0}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onMoveUp(idx);
-                          }}
-                          className="p-1 text-slate-400 hover:text-slate-700 disabled:opacity-30 disabled:cursor-not-allowed rounded transition-colors"
-                          title="Mover para cima"
-                        >
-                          <ChevronUp className="w-3.5 h-3.5" />
-                        </button>
-
-                        <button
-                          type="button"
-                          disabled={idx === blocks.length - 1}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onMoveDown(idx);
-                          }}
-                          className="p-1 text-slate-400 hover:text-slate-700 disabled:opacity-30 disabled:cursor-not-allowed rounded transition-colors"
-                          title="Mover para baixo"
-                        >
-                          <ChevronDown className="w-3.5 h-3.5" />
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onDuplicate(block);
-                          }}
-                          className="p-1 text-slate-400 hover:text-indigo-600 rounded transition-colors"
-                          title="Duplicar bloco"
-                        >
-                          <Copy className="w-3 h-3" />
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onDelete(block.id);
-                          }}
-                          className="p-1 text-slate-400 hover:text-rose-600 rounded transition-colors"
-                          title="Excluir bloco"
-                        >
-                          <Trash2 className="w-3 h-3" />
-                        </button>
+                        <p className={`text-xs font-semibold truncate ${isSelected ? 'text-indigo-950 font-bold' : 'text-slate-800'}`}>
+                          {def?.name || block.type}
+                        </p>
                       </div>
                     </div>
                   );
@@ -395,107 +242,7 @@ export const BlocksSidebar: React.FC<BlocksSidebarProps> = ({
             )}
           </div>
         </div>
-      )}
 
-      {/* Tab: Pre-built Templates */}
-      {activeTab === 'templates' && (
-        <div className="flex-grow flex flex-col min-h-0 overflow-hidden">
-          <div className="px-3 py-2.5 bg-slate-50/80 border-b border-slate-200/80 text-xs text-slate-500 shrink-0">
-            <span className="font-semibold text-slate-700">Modelos Prontos</span>
-            <p className="text-[11px] text-slate-400 mt-0.5">
-              Escolha um modelo pronto para acelerar a sua criação:
-            </p>
-          </div>
-
-          <div className="flex-grow overflow-y-auto p-3 space-y-3 min-h-0">
-
-          <div className="space-y-3">
-            {DEFAULT_TEMPLATES.map((tmpl) => {
-              const isCurrent = tmpl.id === activeTemplateId;
-
-              return (
-                <div
-                  key={tmpl.id}
-                  onClick={() => setTemplateConfirm(tmpl)}
-                  className={`p-3 rounded-xl border transition-all cursor-pointer text-left relative overflow-hidden group ${
-                    isCurrent
-                      ? 'border-indigo-500 bg-indigo-50/40 ring-2 ring-indigo-500/20'
-                      : 'border-slate-200 bg-white hover:border-indigo-300 hover:shadow-xs'
-                  }`}
-                >
-                  <div className="flex items-start justify-between gap-2 mb-1.5">
-                    <span className="text-xs font-bold text-slate-800 group-hover:text-indigo-900 transition-colors">
-                      {tmpl.name}
-                    </span>
-                    {tmpl.badge && (
-                      <span className="text-[10px] bg-indigo-100 text-indigo-800 font-extrabold px-1.5 py-0.5 rounded-full uppercase">
-                        {tmpl.badge}
-                      </span>
-                    )}
-                  </div>
-
-                  <p className="text-[11px] text-slate-500 line-clamp-2 leading-relaxed mb-2.5">
-                    {tmpl.description}
-                  </p>
-
-                  <div className="flex items-center justify-between text-[11px] pt-2 border-t border-slate-100">
-                    <div className="flex items-center gap-1.5">
-                      <span
-                        className="w-2.5 h-2.5 rounded-full border border-slate-300"
-                        style={{ backgroundColor: tmpl.primaryColor }}
-                      />
-                      <span className="text-slate-400 font-mono">
-                        {tmpl.primaryColor}
-                      </span>
-                    </div>
-
-                    <span className="text-xs font-bold text-indigo-600 group-hover:underline flex items-center gap-1">
-                      {isCurrent ? 'Modelo Atual' : 'Carregar'}
-                    </span>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      </div>
-      )}
-
-      {/* Template Confirmation Dialog */}
-      {templateConfirm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-2xs">
-          <div className="bg-white rounded-2xl p-5 max-w-sm w-full shadow-2xl space-y-4 border border-slate-200">
-            <div className="flex items-center gap-2.5 text-amber-600">
-              <AlertTriangle className="w-5 h-5 shrink-0" />
-              <h3 className="text-sm font-bold text-slate-800">Carregar Modelo?</h3>
-            </div>
-
-            <p className="text-xs text-slate-600 leading-relaxed">
-              Deseja carregar o modelo <strong>"{templateConfirm.name}"</strong>? O conteúdo atual será substituído pelos blocos deste modelo.
-            </p>
-
-            <div className="flex items-center justify-end gap-2 pt-2">
-              <button
-                type="button"
-                onClick={() => setTemplateConfirm(null)}
-                className="px-3 py-1.5 text-xs font-semibold text-slate-600 hover:text-slate-800 rounded-lg cursor-pointer"
-              >
-                Cancelar
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  onSelectTemplate(templateConfirm);
-                  setTemplateConfirm(null);
-                }}
-                className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-lg shadow-xs cursor-pointer"
-              >
-                Sim, carregar
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

@@ -1,55 +1,28 @@
-import { beforeEach, describe, expect, it } from 'vitest';
-import {
-  clearDraft,
-  listSavedTemplates,
-  loadDraft,
-  restoreTemplateVersion,
-  saveDraft,
-  saveTemplateDocument,
-} from '../src/utils/templateStore';
-import { EmailBlock, EmailData } from '../src/types';
+import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { createDocumentId } from '../src/utils/templateStore';
 
-const blocks: EmailBlock[] = [{ id: '1', type: 'text', text: 'Olá {{nome}}' }];
-const data: EmailData = {
-  subject: 'Assunto Teste', contentSource: 'blocks', headerTitle: 'Template Teste', greeting: '', buttonText: '', buttonUrl: '', bodyText: '', primaryColor: '#000', activeTemplateId: 'x', customCodeHtml: '<p>Teste</p>',
-};
-
-describe('template persistence', () => {
-  beforeEach(() => {
-    localStorage.clear();
+describe('shared template library contract', () => {
+  it('generates unique UUID document identifiers for Supabase records', () => {
+    const first = createDocumentId();
+    const second = createDocumentId();
+    const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    expect(first).toMatch(uuidPattern);
+    expect(second).toMatch(uuidPattern);
+    expect(second).not.toBe(first);
   });
 
-  it('persists and reloads a draft', () => {
-    saveDraft(blocks, data, 'doc-1');
-    const draft = loadDraft('doc-1');
-    expect(draft?.documentId).toBe('doc-1');
-    expect(draft?.blocks[0].text).toBe('Olá {{nome}}');
-  });
-
-  it('creates versions without duplicating identical saves', () => {
-    const first = saveTemplateDocument({ id: 'doc-1', name: 'Teste', subject: 'Assunto', blocks, emailData: data });
-    const same = saveTemplateDocument({ id: 'doc-1', name: 'Teste', subject: 'Assunto', blocks, emailData: data });
-    expect(same.versions).toHaveLength(1);
-    const second = saveTemplateDocument({ id: 'doc-1', name: 'Teste', subject: 'Assunto', blocks: [{ ...blocks[0], text: 'Novo' }], emailData: data });
-    expect(second.versions.length).toBe(2);
-    expect(listSavedTemplates()).toHaveLength(1);
-    expect(first.id).toBe(second.id);
-  });
-
-  it('persists name and subject changes as document metadata', () => {
-    saveTemplateDocument({ id: 'doc-1', name: 'Teste', subject: 'Assunto', blocks, emailData: data });
-    const updated = saveTemplateDocument({ id: 'doc-1', name: 'Novo Nome', subject: 'Novo Assunto', blocks, emailData: data });
-    expect(updated.name).toBe('Novo Nome');
-    expect(updated.subject).toBe('Novo Assunto');
-    expect(updated.versions).toHaveLength(2);
-  });
-
-  it('restores a previous version', () => {
-    saveTemplateDocument({ id: 'doc-1', name: 'Teste', subject: 'Assunto', blocks, emailData: data });
-    const second = saveTemplateDocument({ id: 'doc-1', name: 'Teste', subject: 'Assunto', blocks: [{ ...blocks[0], text: 'Novo' }], emailData: data });
-    const oldVersion = second.versions[1];
-    const restored = restoreTemplateVersion('doc-1', oldVersion.id);
-    expect(restored?.blocks[0].text).toBe('Olá {{nome}}');
-    clearDraft('doc-1');
+  it('defines online library and private cloud drafts with RLS policies', () => {
+    const migrationPath = resolve(process.cwd(), 'supabase/migrations/202610160001_shared_mailer_library.sql');
+    const sql = readFileSync(migrationPath, 'utf8');
+    expect(sql).toContain('create table if not exists public.mailer_templates');
+    expect(sql).toContain('create table if not exists public.mailer_template_versions');
+    expect(sql).toContain('create table if not exists public.mailer_drafts');
+    expect(sql).toContain('source_template_id uuid references public.mailer_templates(id) on delete set null');
+    expect(sql).toContain('Only admins can delete mailer templates');
+    expect(sql).toContain('Owners and admins can update mailer templates');
+    expect(sql).toContain('Users can read their own drafts');
+    expect(sql).toContain('Template ownership cannot be changed');
   });
 });

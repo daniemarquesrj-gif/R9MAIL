@@ -1,4 +1,6 @@
 import React, { useState, useRef } from 'react';
+import type { EmailBlock } from '../../types';
+import { analyzeHtmlConversion, type HtmlImportAnalysis } from '../../utils/htmlImportAnalysis';
 import {
   X,
   Upload,
@@ -11,7 +13,7 @@ import {
 interface ImportModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onImportHtml: (rawHtml: string) => void;
+  onImportHtml: (rawHtml: string, parsedBlocks: EmailBlock[]) => void;
   onShowToast: (message: string) => void;
 }
 
@@ -26,6 +28,8 @@ export const ImportModal: React.FC<ImportModalProps> = ({
   const [isDragging, setIsDragging] = useState(false);
   const [selectedFileName, setSelectedFileName] = useState<string | null>(null);
   const [loadedFileContent, setLoadedFileContent] = useState<string | null>(null);
+  const [analysis, setAnalysis] = useState<HtmlImportAnalysis | null>(null);
+  const [analysisSource, setAnalysisSource] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   if (!isOpen) return null;
@@ -38,10 +42,14 @@ export const ImportModal: React.FC<ImportModalProps> = ({
     }
 
     setSelectedFileName(file.name);
+    setAnalysis(null);
+    setAnalysisSource(null);
     const reader = new FileReader();
     reader.onload = (e) => {
       const content = e.target?.result as string;
       setLoadedFileContent(content);
+      setAnalysis(null);
+      setAnalysisSource(null);
     };
     reader.readAsText(file);
   };
@@ -61,8 +69,26 @@ export const ImportModal: React.FC<ImportModalProps> = ({
       return;
     }
 
-    onImportHtml(htmlToImport);
-    onShowToast('HTML importado com sucesso para o editor!');
+    // First click analyzes the conversion so users can inspect estimated content loss
+    // before replacing the blocks currently in the editor.
+    if (!analysis || analysisSource !== htmlToImport) {
+      try {
+        const result = analyzeHtmlConversion(htmlToImport);
+        setAnalysis(result);
+        setAnalysisSource(htmlToImport);
+      } catch {
+        onShowToast('Não foi possível analisar este HTML. Confira se o arquivo está íntegro.');
+      }
+      return;
+    }
+
+    onImportHtml(htmlToImport, analysis.blocks);
+    const textSummary = analysis.textCoveragePercent === null
+      ? 'não foi detectado texto para medir'
+      : `${analysis.textCoveragePercent}% do texto (${analysis.retainedWordCount}/${analysis.sourceWordCount} palavras)`;
+    const imageSummary = `${analysis.retainedImageCount}/${analysis.sourceImageCount} imagens`;
+    const linkSummary = `${analysis.retainedLinkCount}/${analysis.sourceLinkCount} links`;
+    onShowToast(`Importação concluída: ${textSummary}; ${imageSummary}; ${linkSummary}. Confira o resultado visual.`);
     onClose();
   };
 
@@ -184,7 +210,7 @@ export const ImportModal: React.FC<ImportModalProps> = ({
               </label>
               <textarea
                 value={pastedCode}
-                onChange={(e) => setPastedCode(e.target.value)}
+                onChange={(e) => { setPastedCode(e.target.value); setAnalysis(null); setAnalysisSource(null); }}
                 placeholder="<!DOCTYPE html><html><body>..."
                 rows={10}
                 className="w-full font-mono text-xs p-3 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 resize-none"
@@ -192,10 +218,30 @@ export const ImportModal: React.FC<ImportModalProps> = ({
             </div>
           )}
 
+          {analysis && analysisSource === (activeTab === 'upload' ? loadedFileContent : pastedCode) && (
+            <div className={`rounded-xl border p-3.5 space-y-2 text-xs ${analysis.hasContentLoss ? 'border-amber-300 bg-amber-50 text-amber-900' : 'border-emerald-200 bg-emerald-50 text-emerald-900'}`}>
+              <div className="flex items-center gap-2 font-bold">
+                {analysis.hasContentLoss ? <AlertCircle className="w-4 h-4 shrink-0" /> : <CheckCircle2 className="w-4 h-4 shrink-0" />}
+                <span>{analysis.hasContentLoss ? 'Análise: há conteúdo que pode não ser preservado' : 'Análise: conteúdo reconhecido'}</span>
+              </div>
+              <p className="leading-relaxed">
+                {analysis.textCoveragePercent === null
+                  ? 'Não foi detectado texto suficiente para calcular o aproveitamento textual.'
+                  : `Aproveitamento textual estimado: ${analysis.textCoveragePercent}% (${analysis.retainedWordCount} de ${analysis.sourceWordCount} palavras identificadas).`}
+              </p>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                <div className="rounded-lg bg-white/70 px-2.5 py-2"><strong className="block text-sm">{analysis.blockCount}</strong><span className="text-[10px]">blocos gerados</span></div>
+                <div className="rounded-lg bg-white/70 px-2.5 py-2"><strong className="block text-sm">{analysis.retainedImageCount}/{analysis.sourceImageCount}</strong><span className="text-[10px]">imagens reconhecidas</span></div>
+                <div className="rounded-lg bg-white/70 px-2.5 py-2"><strong className="block text-sm">{analysis.retainedLinkCount}/{analysis.sourceLinkCount}</strong><span className="text-[10px]">links reconhecidos</span></div>
+              </div>
+              <p className="text-[10px] leading-relaxed opacity-80">A medição considera texto, imagens e links reconhecidos. Colunas, bordas, espaçamentos e outros detalhes visuais podem ser simplificados na conversão para blocos.</p>
+            </div>
+          )}
+
           <div className="bg-amber-50 border border-amber-200/80 rounded-xl p-3 flex items-start gap-2.5 text-xs text-amber-800">
             <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
             <p>
-              Ao importar um novo HTML, os blocos atuais serão substituídos pela estrutura identificada no código.
+              A primeira etapa analisa o conteúdo sem substituir o e-mail atual. Só depois de conferir o resultado você confirma a importação.
             </p>
           </div>
         </div>
@@ -216,7 +262,7 @@ export const ImportModal: React.FC<ImportModalProps> = ({
             disabled={activeTab === 'upload' ? !loadedFileContent : !pastedCode.trim()}
             className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-bold rounded-lg shadow-xs transition-all active:scale-95 cursor-pointer"
           >
-            Importar para o Editor
+            {analysis && analysisSource === (activeTab === 'upload' ? loadedFileContent : pastedCode) ? 'Confirmar e importar' : 'Analisar conversão'}
           </button>
         </div>
       </div>
