@@ -44,6 +44,8 @@ interface GeradorProScreenProps {
   onNavigate: (screen: Screen, transition?: TransitionType) => void;
   openLibraryOnStart?: boolean;
   onLibraryStartHandled?: () => void;
+  initialTemplateToUse?: TemplateDocument | null;
+  onInitialTemplateHandled?: () => void;
   onSignOut: () => Promise<void>;
 }
 
@@ -54,6 +56,8 @@ export const GeradorProScreen: React.FC<GeradorProScreenProps> = ({
   onNavigate,
   openLibraryOnStart = false,
   onLibraryStartHandled,
+  initialTemplateToUse = null,
+  onInitialTemplateHandled,
   onSignOut,
 }) => {
   // Each document has a UUID so the database can enforce stable ownership and draft isolation.
@@ -458,6 +462,20 @@ export const GeradorProScreen: React.FC<GeradorProScreenProps> = ({
     setIsTemplateManagerOpen(false);
     showToast(`Cópia de "${template.name}" criada. O original permanece intacto.`);
   };
+
+  const lastInitialTemplateAppliedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!initialTemplateToUse) {
+      lastInitialTemplateAppliedRef.current = null;
+      return;
+    }
+    if (!documentId || draftLoadedFor !== documentId) return;
+    if (lastInitialTemplateAppliedRef.current === initialTemplateToUse.id) return;
+
+    lastInitialTemplateAppliedRef.current = initialTemplateToUse.id;
+    handleUseTemplate(initialTemplateToUse);
+    onInitialTemplateHandled?.();
+  }, [initialTemplateToUse, documentId, draftLoadedFor, onInitialTemplateHandled]);
 
   const handleDeleteSavedTemplate = async (id: string) => {
     try {

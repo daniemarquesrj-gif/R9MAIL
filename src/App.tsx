@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
-import { Screen, TransitionType, EmailData, EmailTemplate } from './types';
+import { Screen, TransitionType, EmailData } from './types';
 import { DEFAULT_TEMPLATES } from './data/templates';
-import { createDocumentId } from './utils/templateStore';
+import type { TemplateDocument } from './utils/templateStore';
 
 import { Header } from './components/Header';
 import { Footer } from './components/Footer';
@@ -53,16 +53,25 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!authReady || !authenticated || !authUserId) {
+    if (!authReady) {
       setShowDailyNotice(false);
       return;
     }
 
-    // Stores only the last date the notice was dismissed, not user content or templates.
+    // The announcement must also be available before login, so its daily
+    // dismissal is tracked with a browser-wide key. This keeps it from opening
+    // a second time immediately after a user signs in.
     const today = getLocalDateKey();
-    const storageKey = `r9bot-mailer-daily-notice:v1:${authUserId}`;
+    const globalStorageKey = 'r9bot-mailer-daily-notice:v2:global';
+    const accountStorageKey = authUserId
+      ? `r9bot-mailer-daily-notice:v1:${authUserId}`
+      : null;
     try {
-      setShowDailyNotice(window.localStorage.getItem(storageKey) !== today);
+      const dismissedGlobally = window.localStorage.getItem(globalStorageKey) === today;
+      const dismissedForAccount = accountStorageKey
+        ? window.localStorage.getItem(accountStorageKey) === today
+        : false;
+      setShowDailyNotice(!dismissedGlobally && !dismissedForAccount);
     } catch {
       // If browser storage is unavailable, show the notice for this session.
       setShowDailyNotice(true);
@@ -70,13 +79,15 @@ export default function App() {
   }, [authReady, authenticated, authUserId]);
 
   const handleDismissDailyNotice = () => {
-    if (authUserId) {
-      const storageKey = `r9bot-mailer-daily-notice:v1:${authUserId}`;
-      try {
-        window.localStorage.setItem(storageKey, getLocalDateKey());
-      } catch {
-        // Closing still works when browser storage is blocked.
+    const today = getLocalDateKey();
+    try {
+      // Works on the login page too, when no user ID is available yet.
+      window.localStorage.setItem('r9bot-mailer-daily-notice:v2:global', today);
+      if (authUserId) {
+        window.localStorage.setItem(`r9bot-mailer-daily-notice:v1:${authUserId}`, today);
       }
+    } catch {
+      // Closing still works when browser storage is blocked.
     }
     setShowDailyNotice(false);
   };
@@ -84,6 +95,7 @@ export default function App() {
   const [currentScreen, setCurrentScreen] = useState<Screen>('inicio');
   const [transitionType, setTransitionType] = useState<TransitionType>('none');
   const [openLibraryOnEditor, setOpenLibraryOnEditor] = useState(false);
+  const [homeLibraryTemplate, setHomeLibraryTemplate] = useState<TemplateDocument | null>(null);
 
   const defaultTmpl = DEFAULT_TEMPLATES[0];
 
@@ -124,22 +136,8 @@ export default function App() {
     setCurrentScreen('inicio');
   };
 
-  const handleSelectHomeTemplate = (template: EmailTemplate) => {
-    setEmailData((prev) => ({
-      ...prev,
-      headerTitle: template.headerTitle,
-      greeting: template.greeting,
-      buttonText: template.buttonText,
-      buttonUrl: template.buttonUrl,
-      bodyText: template.bodyText,
-      footerText: template.footerText,
-      primaryColor: template.primaryColor,
-      activeTemplateId: template.id,
-      subject: template.headerTitle,
-      customCodeHtml: template.customCodeHtml,
-      contentSource: 'html',
-      documentId: createDocumentId(),
-    }));
+  const handleSelectHomeLibraryTemplate = (template: TemplateDocument) => {
+    setHomeLibraryTemplate(template);
     handleNavigate('gerador_pro', 'push');
   };
 
@@ -184,7 +182,10 @@ export default function App() {
       onBackToLogin={() => { setPasswordResetMode(false); setAuthenticated(false); }}
     />;
   }
-  if (!authenticated) return <LoginScreen onAuthenticated={() => setAuthenticated(true)} />;
+  if (!authenticated) return <>
+    <LoginScreen onAuthenticated={() => setAuthenticated(true)} />
+    {showDailyNotice && <DailyNoticeModal onDismiss={handleDismissDailyNotice} />}
+  </>;
 
   return (
     <ErrorBoundary fallbackTitle="R9Bot Mailer" fallbackMessage="O aplicativo encontrou um erro inesperado. Seus rascunhos e modelos ficam na nuvem quando o salvamento é confirmado. Tente novamente." resetLabel="Tentar novamente">
@@ -218,7 +219,7 @@ export default function App() {
             {currentScreen === 'inicio' && (
               <InicioScreen
                 onNavigate={handleNavigate}
-                onSelectTemplate={handleSelectHomeTemplate}
+                onSelectLibraryTemplate={handleSelectHomeLibraryTemplate}
                 onOpenLibrary={() => {
                   setOpenLibraryOnEditor(true);
                   handleNavigate('gerador_pro', 'push');
@@ -233,6 +234,8 @@ export default function App() {
                 onNavigate={handleNavigate}
                 openLibraryOnStart={openLibraryOnEditor}
                 onLibraryStartHandled={() => setOpenLibraryOnEditor(false)}
+                initialTemplateToUse={homeLibraryTemplate}
+                onInitialTemplateHandled={() => setHomeLibraryTemplate(null)}
                 onSignOut={handleSignOut}
               />
             )}

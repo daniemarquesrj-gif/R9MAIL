@@ -46,6 +46,12 @@ export function DailyNoticeModal({ onDismiss }: DailyNoticeModalProps) {
               <p className="mt-1 text-sm leading-6 text-slate-600">
                 Precisamos identificar quem criou cada modelo e permitir que a equipe compartilhe materiais com segurança. Por isso, o acesso agora é feito com e-mail e senha.
               </p>
+              <div className="mt-3 rounded-xl border border-blue-100 bg-blue-50 px-3 py-3">
+                <p className="text-sm font-semibold text-blue-950">Ainda não tem uma conta? Você pode criar a sua!</p>
+                <p className="mt-1 text-sm leading-6 text-blue-900">
+                  Qualquer funcionário pode se cadastrar: na tela de acesso, clique em “Não tem uma conta? Criar conta”, informe seu e-mail e escolha uma senha. Não precisa pedir a alguém para criar o login por você. Se for solicitado, confirme seu e-mail para concluir o cadastro.
+                </p>
+              </div>
             </div>
           </div>
 

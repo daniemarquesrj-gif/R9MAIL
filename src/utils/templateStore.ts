@@ -138,13 +138,17 @@ async function fetchVersions(templateIds: string[]): Promise<DbRow[]> {
   return (data || []) as DbRow[];
 }
 
-export async function listSavedTemplates(): Promise<TemplateDocument[]> {
+export async function listSavedTemplates(limit?: number): Promise<TemplateDocument[]> {
   const client = getClient();
-  const { data, error } = await client
+  let query = client
     .from('mailer_templates')
     .select('id, name, subject, description, blocks, email_data, is_public, created_by, updated_by, created_at, updated_at')
     .eq('is_public', true)
     .order('updated_at', { ascending: false });
+  if (typeof limit === 'number' && Number.isFinite(limit) && limit > 0) {
+    query = query.limit(Math.floor(limit));
+  }
+  const { data, error } = await query;
   if (error) {
     throw new Error('Não foi possível carregar a biblioteca. Confirme se a migração Supabase foi aplicada.');
   }

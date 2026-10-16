@@ -3,7 +3,7 @@
 Aplicação para criar, importar, editar, organizar e exportar e-mails usando blocos visuais.
 
 ## Telas
-- **Início:** abre o editor ou permite começar de um modelo pronto.
+- **Início:** abre o editor, dá acesso à Biblioteca e mostra os três modelos públicos atualizados mais recentemente.
 - **Editor:** blocos arrastáveis, edição de texto diretamente no e-mail, imagens, botões, desfazer/refazer, prévia responsiva, importação e exportação de HTML.
 - **Biblioteca de modelos:** catálogo compartilhado de modelos públicos, com cópia independente para uso e permissões de edição por proprietário/administrador.
 
@@ -71,4 +71,8 @@ A publicação do modelo é executada antes da gravação do rascunho privado, e
 
 ## Aviso diário de novidades
 
-Ao entrar com uma conta autenticada, o aplicativo apresenta um aviso sobre o login por e-mail e senha e a Biblioteca compartilhada na primeira abertura do dia. O aviso pode ser fechado pelo botão `X` ou por `Entendi, continuar` e volta a aparecer no próximo dia. Para lembrar a data em que o aviso foi fechado, o aplicativo guarda somente a data local no `localStorage`, com uma chave separada por usuário; modelos e rascunhos não são armazenados ali.
+O aviso aparece também na tela de login, antes de a pessoa entrar, e continua disponível após a autenticação. Ele explica o login por e-mail, a Biblioteca compartilhada e deixa claro que qualquer funcionário pode criar a própria conta pelo botão **Criar conta**. O aviso pode ser fechado pelo botão `X` ou por `Entendi, continuar` e volta a aparecer no próximo dia. Como ele também aparece antes do login, o aplicativo guarda somente a data em que foi fechado em uma chave local do navegador; essa marcação evita que o aviso reapareça imediatamente após a pessoa entrar. Modelos e rascunhos não são armazenados nessa chave.
+
+
+## Modelos recentes na página inicial
+A seção de modelos do Início é carregada da Biblioteca compartilhada no Supabase e mostra até três modelos públicos ordenados pela atualização mais recente. O botão **Usar modelo** abre uma cópia independente no editor, sem alterar o modelo original. Se ainda não houver modelos publicados, ou se a conexão falhar, a página mostra uma mensagem de estado vazio/erro e oferece acesso à Biblioteca ou nova tentativa; as imagens locais dos modelos antigos não são mais usadas nessa seção.
