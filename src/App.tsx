@@ -10,6 +10,7 @@ import { DailyNoticeModal } from './components/DailyNoticeModal';
 
 import { GeradorProScreen } from './screens/GeradorProScreen';
 import { InicioScreen } from './screens/InicioScreen';
+import { BibliotecaScreen } from './screens/BibliotecaScreen';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { LoginScreen } from './components/auth/LoginScreen';
 import { ResetPasswordScreen } from './components/auth/ResetPasswordScreen';
@@ -96,6 +97,7 @@ export default function App() {
   const [transitionType, setTransitionType] = useState<TransitionType>('none');
   const [openLibraryOnEditor, setOpenLibraryOnEditor] = useState(false);
   const [homeLibraryTemplate, setHomeLibraryTemplate] = useState<TemplateDocument | null>(null);
+  const [homeLibraryTemplateToEdit, setHomeLibraryTemplateToEdit] = useState<TemplateDocument | null>(null);
 
   const defaultTmpl = DEFAULT_TEMPLATES[0];
 
@@ -137,6 +139,7 @@ export default function App() {
   };
 
   const handleSelectHomeLibraryTemplate = (template: TemplateDocument) => {
+    setHomeLibraryTemplateToEdit(null);
     setHomeLibraryTemplate(template);
     handleNavigate('gerador_pro', 'push');
   };
@@ -170,6 +173,8 @@ export default function App() {
         return '/ inicio-guia.html';
       case 'gerador_pro':
         return '/ gerador-pro-blocos.html';
+      case 'biblioteca':
+        return '/ biblioteca.html';
       default:
         return '/ modelo-de-email.html';
     }
@@ -196,10 +201,6 @@ export default function App() {
           currentScreen={currentScreen}
           onNavigate={handleNavigate}
           subtitle={getSubtitle()}
-          onOpenLibrary={() => {
-            setOpenLibraryOnEditor(true);
-            handleNavigate('gerador_pro', 'push');
-          }}
           onSignOut={handleSignOut}
         />
       )}
@@ -221,7 +222,26 @@ export default function App() {
                 onNavigate={handleNavigate}
                 onSelectLibraryTemplate={handleSelectHomeLibraryTemplate}
                 onOpenLibrary={() => {
-                  setOpenLibraryOnEditor(true);
+                  handleNavigate('biblioteca', 'push');
+                }}
+              />
+            )}
+
+            {currentScreen === 'biblioteca' && (
+              <BibliotecaScreen
+                onUseTemplate={(template) => {
+                  setHomeLibraryTemplate(template);
+                  setHomeLibraryTemplateToEdit(null);
+                  handleNavigate('gerador_pro', 'push');
+                }}
+                onEditTemplate={(template) => {
+                  setHomeLibraryTemplate(null);
+                  setHomeLibraryTemplateToEdit(template);
+                  handleNavigate('gerador_pro', 'push');
+                }}
+                onCreateTemplate={() => {
+                  setHomeLibraryTemplate(null);
+                  setHomeLibraryTemplateToEdit(null);
                   handleNavigate('gerador_pro', 'push');
                 }}
               />
@@ -236,6 +256,8 @@ export default function App() {
                 onLibraryStartHandled={() => setOpenLibraryOnEditor(false)}
                 initialTemplateToUse={homeLibraryTemplate}
                 onInitialTemplateHandled={() => setHomeLibraryTemplate(null)}
+                initialTemplateToEdit={homeLibraryTemplateToEdit}
+                onInitialTemplateEditHandled={() => setHomeLibraryTemplateToEdit(null)}
                 onSignOut={handleSignOut}
               />
             )}

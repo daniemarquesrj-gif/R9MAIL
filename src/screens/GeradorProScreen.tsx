@@ -46,6 +46,8 @@ interface GeradorProScreenProps {
   onLibraryStartHandled?: () => void;
   initialTemplateToUse?: TemplateDocument | null;
   onInitialTemplateHandled?: () => void;
+  initialTemplateToEdit?: TemplateDocument | null;
+  onInitialTemplateEditHandled?: () => void;
   onSignOut: () => Promise<void>;
 }
 
@@ -58,6 +60,8 @@ export const GeradorProScreen: React.FC<GeradorProScreenProps> = ({
   onLibraryStartHandled,
   initialTemplateToUse = null,
   onInitialTemplateHandled,
+  initialTemplateToEdit = null,
+  onInitialTemplateEditHandled,
   onSignOut,
 }) => {
   // Each document has a UUID so the database can enforce stable ownership and draft isolation.
@@ -464,6 +468,7 @@ export const GeradorProScreen: React.FC<GeradorProScreenProps> = ({
   };
 
   const lastInitialTemplateAppliedRef = useRef<string | null>(null);
+  const lastInitialTemplateEditAppliedRef = useRef<string | null>(null);
   useEffect(() => {
     if (!initialTemplateToUse) {
       lastInitialTemplateAppliedRef.current = null;
@@ -476,6 +481,19 @@ export const GeradorProScreen: React.FC<GeradorProScreenProps> = ({
     handleUseTemplate(initialTemplateToUse);
     onInitialTemplateHandled?.();
   }, [initialTemplateToUse, documentId, draftLoadedFor, onInitialTemplateHandled]);
+
+  useEffect(() => {
+    if (!initialTemplateToEdit) {
+      lastInitialTemplateEditAppliedRef.current = null;
+      return;
+    }
+    if (!documentId || draftLoadedFor !== documentId) return;
+    if (lastInitialTemplateEditAppliedRef.current === initialTemplateToEdit.id) return;
+
+    lastInitialTemplateEditAppliedRef.current = initialTemplateToEdit.id;
+    handleLoadSavedTemplate(initialTemplateToEdit);
+    onInitialTemplateEditHandled?.();
+  }, [initialTemplateToEdit, documentId, draftLoadedFor, onInitialTemplateEditHandled]);
 
   const handleDeleteSavedTemplate = async (id: string) => {
     try {

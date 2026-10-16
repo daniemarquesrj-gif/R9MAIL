@@ -76,3 +76,13 @@ O aviso aparece também na tela de login, antes de a pessoa entrar, e continua d
 
 ## Modelos recentes na página inicial
 A seção de modelos do Início é carregada da Biblioteca compartilhada no Supabase e mostra até três modelos públicos ordenados pela atualização mais recente. O botão **Usar modelo** abre uma cópia independente no editor, sem alterar o modelo original. Se ainda não houver modelos publicados, ou se a conexão falhar, a página mostra uma mensagem de estado vazio/erro e oferece acesso à Biblioteca ou nova tentativa; as imagens locais dos modelos antigos não são mais usadas nessa seção.
+
+## Biblioteca como página completa
+
+A navegação principal agora abre uma página dedicada da Biblioteca. A janela compacta de seleção continua disponível dentro do editor para que seja possível escolher um modelo sem sair do fluxo de edição.
+
+A página completa inclui busca por nome, descrição ou assunto; filtros para todos os modelos públicos e modelos criados pelo usuário; detalhes e histórico de versões; uso de uma cópia independente; edição permitida somente ao dono ou administrador; exclusão somente por administradores; restauração de versões anteriores para dono/admin; e estados de carregamento, erro e biblioteca vazia.
+
+### Prévia compacta dos modelos da biblioteca
+
+A página da Biblioteca mostra uma miniatura visual baseada nos blocos reais do modelo, tanto nos cartões da lista quanto no painel de detalhes. A prévia é renderizada com componentes React leves (sem criar um iframe ou fazer uma nova consulta ao Supabase por cartão), mostra apenas os primeiros blocos para manter a interface rápida e carrega imagens com `loading="lazy"`.
